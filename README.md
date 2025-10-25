@@ -68,14 +68,16 @@ python visualize_results.py --input-dir output/json --plot-types overall
 
 ### Utility Modules (Reusable!)
 
+Located in `utils/` directory:
+
 | Module | Purpose | Reusable For |
 |--------|---------|--------------|
-| **ollama_utils.py** | Ollama API interaction | Any Ollama project |
-| **prompt_utils.py** | Prompt formatting | Any multiple-choice benchmark |
-| **evaluation_utils.py** | Evaluation framework | Any dataset evaluation |
-| **mmlu_utils.py** | MMLU dataset handling | MMLU benchmarks |
-| **mmlu_pro_utils.py** | MMLU-Pro dataset handling | MMLU-Pro benchmarks |
-| **visualization_utils.py** | Plotting utilities | Any result visualization |
+| **utils/ollama.py** | Ollama API interaction | Any Ollama project |
+| **utils/prompts.py** | Prompt formatting | Any multiple-choice benchmark |
+| **utils/evaluation.py** | Evaluation framework | Any dataset evaluation |
+| **utils/mmlu.py** | MMLU dataset handling | MMLU benchmarks |
+| **utils/mmlu_pro.py** | MMLU-Pro dataset handling | MMLU-Pro benchmarks |
+| **utils/visualization.py** | Plotting utilities | Any result visualization |
 
 ### Example Scripts
 
@@ -153,19 +155,19 @@ python visualize_results.py --input-dir output/json \
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                   Benchmark Scripts Layer                    │
-│  - mmlu_benchmark_modular.py                                │
+│  - mmlu_benchmark.py                                        │
 │  - mmlu_pro_benchmark.py                                    │
 │  - visualize_results.py                                     │
 └────────────────────┬────────────────────────────────────────┘
                      │ imports
 ┌────────────────────▼────────────────────────────────────────┐
-│                  Reusable Utilities Layer                    │
-│  - ollama_utils.py       (Ollama API)                       │
-│  - prompt_utils.py       (Prompt formatting)                │
-│  - evaluation_utils.py   (Evaluation framework)             │
-│  - mmlu_utils.py         (MMLU specific)                    │
-│  - mmlu_pro_utils.py     (MMLU-Pro specific)                │
-│  - visualization_utils.py (Plotting)                        │
+│              Reusable Utilities Layer (utils/)               │
+│  - utils/ollama.py        (Ollama API)                      │
+│  - utils/prompts.py       (Prompt formatting)               │
+│  - utils/evaluation.py    (Evaluation framework)            │
+│  - utils/mmlu.py          (MMLU specific)                   │
+│  - utils/mmlu_pro.py      (MMLU-Pro specific)               │
+│  - utils/visualization.py (Plotting)                        │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -201,10 +203,10 @@ All plots are publication-ready at 300 DPI.
 The modular design makes it easy to add new benchmarks:
 
 ```python
-# 1. Create your dataset utilities
-from ollama_utils import query_ollama
-from prompt_utils import format_multiple_choice_prompt, extract_letter_answer
-from evaluation_utils import evaluate_dataset, save_results
+# 1. Import utilities
+from utils.ollama import query_ollama
+from utils.prompts import format_multiple_choice_prompt, extract_letter_answer
+from utils.evaluation import evaluate_dataset, save_results
 
 # 2. Define your evaluator
 def my_evaluator(sample):
@@ -265,38 +267,27 @@ python visualize_results.py \
 
 ```
 LLM-Evaluation/
-├── Core Utilities
-│   ├── ollama_utils.py
-│   ├── prompt_utils.py
-│   ├── evaluation_utils.py
-│   ├── mmlu_utils.py
-│   ├── mmlu_pro_utils.py
-│   └── visualization_utils.py
+├── utils/                   (Reusable utility modules)
+│   ├── __init__.py
+│   ├── ollama.py           (Ollama API interaction)
+│   ├── prompts.py          (Prompt formatting)
+│   ├── evaluation.py       (Evaluation framework)
+│   ├── mmlu.py             (MMLU dataset handling)
+│   ├── mmlu_pro.py         (MMLU-Pro dataset handling)
+│   └── visualization.py    (Plotting utilities)
 │
 ├── Benchmark Scripts
-│   ├── mmlu_benchmark_modular.py
+│   ├── mmlu_benchmark.py
 │   ├── mmlu_pro_benchmark.py
 │   └── visualize_results.py
 │
-├── Examples & Documentation
-│   ├── example_custom_benchmark.py
-│   ├── quick_start.py
-│   ├── README.md (this file)
-│   ├── README_MODULAR.md
-│   ├── README_MMLU_PRO.md
-│   ├── README_VISUALIZATION.md
-│   ├── MMLU_vs_MMLU_PRO.md
-│   └── PROJECT_STRUCTURE.md
-│
 ├── Output Directories
-│   ├── output/json/          (benchmark results)
-│   └── output/plots/         (visualization plots)
+│   ├── output/json/        (benchmark results)
+│   └── output/plots/       (visualization plots)
 │
 ├── Configuration
-│   └── requirements.txt
-│
-└── Legacy
-    └── mmlu_benchmark.py     (original class-based version)
+│   ├── requirements.txt
+│   └── README.md (this file)
 ```
 
 ## 🛠️ Requirements

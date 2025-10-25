@@ -107,7 +107,7 @@ def parse_mmlu_sample(sample: Dict) -> tuple:
 
     # Convert answer index to letter (0->A, 1->B, 2->C, 3->D)
     if isinstance(correct_answer, int):
-        from prompt_utils import index_to_letter
+        from .prompts import index_to_letter
         correct_letter = index_to_letter(correct_answer)
     else:
         correct_letter = correct_answer.upper()

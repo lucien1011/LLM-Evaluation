@@ -10,15 +10,15 @@ from typing import Dict, List, Tuple
 from pathlib import Path
 
 # Import our modular utilities
-from ollama_utils import check_ollama_connection, query_ollama
-from prompt_utils import format_multiple_choice_prompt, extract_letter_answer
-from evaluation_utils import (
+from utils.ollama import check_ollama_connection, query_ollama
+from utils.prompts import format_multiple_choice_prompt, extract_letter_answer
+from utils.evaluation import (
     evaluate_dataset,
     calculate_overall_stats,
     save_results,
     print_results_summary
 )
-from mmlu_utils import (
+from utils.mmlu import (
     load_mmlu_subject,
     parse_mmlu_sample,
     DEFAULT_MMLU_SUBJECTS

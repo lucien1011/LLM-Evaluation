@@ -12,7 +12,7 @@ import numpy as np
 from pathlib import Path
 from typing import Dict, List, Tuple
 
-from visualization_utils import (
+from utils.visualization import (
     load_result_file,
     extract_model_name,
     extract_overall_accuracy,
