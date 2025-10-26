@@ -1,15 +1,21 @@
 # LLM Evaluation Toolkit
 
-A comprehensive, modular toolkit for evaluating large language models using Ollama. Supports MMLU, MMLU-Pro benchmarks, and includes powerful visualization tools.
+A comprehensive, modular toolkit for evaluating large language models using Ollama. Supports 8 diverse benchmarks covering reasoning, math, coding, and truthfulness.
 
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 ## 🌟 Features
 
-- **Two Comprehensive Benchmarks**
-  - MMLU: 14,000 questions, 4 choices, 57 subjects
-  - MMLU-Pro: 12,000+ questions, 10 choices, 14 categories
+- **Eight Comprehensive Benchmarks**
+  - MMLU: 14,000 questions, 4 choices, 57 subjects (general knowledge)
+  - MMLU-Pro: 12,000+ questions, 10 choices, 14 categories (harder reasoning)
+  - TruthfulQA: 817 questions testing factual accuracy and truthfulness
+  - ARC: 7,800 science questions with Easy/Challenge difficulty levels
+  - HellaSwag: 70,000 commonsense reasoning questions
+  - GPQA: 448 graduate-level science questions (expert knowledge)
+  - GSM8K: 8,500 grade school math word problems
+  - HumanEval: 164 Python programming problems with auto-evaluation
 
 - **Modular Architecture**
   - Reusable utility modules
@@ -60,11 +66,17 @@ python visualize_results.py --input-dir output/json --plot-types overall
 
 ### Benchmark Scripts
 
-| Script | Purpose | Benchmark | Questions | Choices |
-|--------|---------|-----------|-----------|---------|
-| **mmlu_benchmark_modular.py** | MMLU evaluation | MMLU | 14,000 | 4 (A-D) |
-| **mmlu_pro_benchmark.py** | MMLU-Pro evaluation | MMLU-Pro | 12,000+ | 10 (A-J) |
-| **visualize_results.py** | Results visualization | Both | - | - |
+| Script | Purpose | Benchmark | Questions | Format |
+|--------|---------|-----------|-----------|--------|
+| **mmlu_benchmark.py** | MMLU evaluation | MMLU | 14,000 | 4 choices (A-D) |
+| **mmlu_pro_benchmark.py** | MMLU-Pro evaluation | MMLU-Pro | 12,000+ | 10 choices (A-J) |
+| **truthfulqa_benchmark.py** | TruthfulQA evaluation | TruthfulQA | 817 | 4-5 choices |
+| **arc_benchmark.py** | ARC evaluation | ARC | 7,800 | 4 choices (A-D) |
+| **hellaswag_benchmark.py** | HellaSwag evaluation | HellaSwag | 70,000 | 4 choices (A-D) |
+| **gpqa_benchmark.py** | GPQA evaluation | GPQA | 448 | 4 choices (A-D) |
+| **gsm8k_benchmark.py** | GSM8K evaluation | GSM8K | 8,500 | Numerical answer |
+| **humaneval_benchmark.py** | HumanEval evaluation | HumanEval | 164 | Code generation |
+| **visualize_results.py** | Results visualization | All | - | - |
 
 ### Utility Modules (Reusable!)
 
@@ -77,6 +89,12 @@ Located in `utils/` directory:
 | **utils/evaluation.py** | Evaluation framework | Any dataset evaluation |
 | **utils/mmlu.py** | MMLU dataset handling | MMLU benchmarks |
 | **utils/mmlu_pro.py** | MMLU-Pro dataset handling | MMLU-Pro benchmarks |
+| **utils/truthfulqa.py** | TruthfulQA dataset handling | TruthfulQA benchmarks |
+| **utils/arc.py** | ARC dataset handling | ARC benchmarks |
+| **utils/hellaswag.py** | HellaSwag dataset handling | HellaSwag benchmarks |
+| **utils/gpqa.py** | GPQA dataset handling | GPQA benchmarks |
+| **utils/gsm8k.py** | GSM8K dataset + numerical extraction | Math benchmarks |
+| **utils/humaneval.py** | HumanEval dataset + code execution | Code benchmarks |
 | **utils/visualization.py** | Plotting utilities | Any result visualization |
 
 ### Example Scripts
@@ -135,6 +153,81 @@ python mmlu_benchmark_modular.py --model gemma3:27b --output output/json/gemma_2
 python visualize_results.py --benchmark mmlu --plot-types overall subject radar heatmap
 ```
 
+### Benchmark on TruthfulQA (Test Truthfulness)
+
+```bash
+# Quick test (MC1 format - single correct answer)
+python truthfulqa_benchmark.py --model gemma3:latest --max-samples 10
+
+# Test MC2 format (multiple correct answers)
+python truthfulqa_benchmark.py --model gemma3:latest --format mc2 --max-samples 10
+
+# Filter by specific categories
+python truthfulqa_benchmark.py --model gemma3:latest --categories Health Law
+
+# Full evaluation (817 questions)
+python truthfulqa_benchmark.py --model gemma3:latest
+```
+
+### Benchmark on ARC (Science Reasoning)
+
+```bash
+# Quick test (Challenge difficulty)
+python arc_benchmark.py --model gemma3:latest --max-samples 10
+
+# Easy difficulty
+python arc_benchmark.py --model gemma3:latest --difficulty ARC-Easy --max-samples 50
+
+# Full Challenge evaluation
+python arc_benchmark.py --model gemma3:latest --difficulty ARC-Challenge
+```
+
+### Benchmark on HellaSwag (Commonsense Reasoning)
+
+```bash
+# Quick test
+python hellaswag_benchmark.py --model gemma3:latest --max-samples 10
+
+# Full evaluation (70,000 questions - takes several hours)
+python hellaswag_benchmark.py --model gemma3:latest
+```
+
+### Benchmark on GPQA (Graduate-Level Questions)
+
+```bash
+# Quick test (main subset)
+python gpqa_benchmark.py --model gemma3:latest --max-samples 10
+
+# Diamond subset (highest quality)
+python gpqa_benchmark.py --model gemma3:latest --subset gpqa_diamond
+
+# Extended subset (all questions)
+python gpqa_benchmark.py --model gemma3:latest --subset gpqa_extended
+```
+
+### Benchmark on GSM8K (Math Word Problems)
+
+```bash
+# Quick test
+python gsm8k_benchmark.py --model gemma3:latest --max-samples 10
+
+# Full test evaluation (1,000 questions)
+python gsm8k_benchmark.py --model gemma3:latest
+
+# Train set evaluation
+python gsm8k_benchmark.py --model gemma3:latest --split train --max-samples 100
+```
+
+### Benchmark on HumanEval (Code Generation)
+
+```bash
+# Quick test
+python humaneval_benchmark.py --model gemma3:latest --max-samples 10
+
+# Full evaluation (164 problems)
+python humaneval_benchmark.py --model gemma3:latest
+```
+
 ### Visualize Results
 
 ```bash
@@ -175,17 +268,22 @@ python visualize_results.py --input-dir output/json \
 
 ## 📊 Benchmarks Comparison
 
-| Feature | MMLU | MMLU-Pro |
-|---------|------|----------|
-| Questions | 14,000 | 12,000+ |
-| Answer Choices | 4 (A-D) | 10 (A-J) |
-| Organization | 57 subjects | 14 categories |
-| Difficulty | Moderate | Hard |
-| Random Baseline | 25% | 10% |
-| Dataset | `cais/mmlu` | `TIGER-Lab/MMLU-Pro` |
-| Published | 2020 | 2024 (NeurIPS) |
+| Benchmark | Questions | Format | Focus Area | Difficulty | Random Baseline |
+|-----------|-----------|--------|------------|------------|-----------------|
+| **MMLU** | 14,000 | 4 choices | General knowledge (57 subjects) | Moderate | 25% |
+| **MMLU-Pro** | 12,000+ | 10 choices | Advanced reasoning (14 categories) | Hard | 10% |
+| **TruthfulQA** | 817 | 4-5 choices | Truthfulness & misconceptions | Moderate | 25% |
+| **ARC** | 7,800 | 4 choices | Science reasoning | Easy/Challenge | 25% |
+| **HellaSwag** | 70,000 | 4 choices | Commonsense reasoning | Moderate | 25% |
+| **GPQA** | 448 | 4 choices | Graduate-level science | Very Hard | 25% |
+| **GSM8K** | 8,500 | Numerical | Grade school math | Moderate | 0% |
+| **HumanEval** | 164 | Code | Python programming | Hard | 0% |
 
-**Expected Performance**: Models typically score 15-20% lower on MMLU-Pro than MMLU.
+**Performance Expectations**:
+- Models typically score 15-20% lower on MMLU-Pro than MMLU
+- GPQA is extremely challenging (even GPT-4 scores ~50%)
+- GSM8K requires multi-step reasoning
+- HumanEval tests practical coding ability (Pass@1 metric)
 
 ## 📈 Visualization Types
 
@@ -274,11 +372,23 @@ LLM-Evaluation/
 │   ├── evaluation.py       (Evaluation framework)
 │   ├── mmlu.py             (MMLU dataset handling)
 │   ├── mmlu_pro.py         (MMLU-Pro dataset handling)
+│   ├── truthfulqa.py       (TruthfulQA dataset handling)
+│   ├── arc.py              (ARC dataset handling)
+│   ├── hellaswag.py        (HellaSwag dataset handling)
+│   ├── gpqa.py             (GPQA dataset handling)
+│   ├── gsm8k.py            (GSM8K dataset + numerical extraction)
+│   ├── humaneval.py        (HumanEval dataset + code execution)
 │   └── visualization.py    (Plotting utilities)
 │
 ├── Benchmark Scripts
 │   ├── mmlu_benchmark.py
 │   ├── mmlu_pro_benchmark.py
+│   ├── truthfulqa_benchmark.py
+│   ├── arc_benchmark.py
+│   ├── hellaswag_benchmark.py
+│   ├── gpqa_benchmark.py
+│   ├── gsm8k_benchmark.py
+│   ├── humaneval_benchmark.py
 │   └── visualize_results.py
 │
 ├── Output Directories
@@ -303,27 +413,36 @@ LLM-Evaluation/
 
 ## 🎓 Performance Expectations
 
-### MMLU (4 choices)
-- Random guessing: 25%
-- Small models (<7B): 40-55%
-- Medium models (7-13B): 55-65%
-- Large models (30-70B): 65-75%
-- GPT-4: 85-90%
+### Multiple Choice Benchmarks
 
-### MMLU-Pro (10 choices)
-- Random guessing: 10%
-- Small models (<7B): 20-35%
-- Medium models (7-13B): 35-50%
-- Large models (30-70B): 45-60%
-- GPT-4: 65-75%
+| Benchmark | Small (<7B) | Medium (7-13B) | Large (30-70B) | GPT-4 |
+|-----------|-------------|----------------|----------------|-------|
+| **MMLU** | 40-55% | 55-65% | 65-75% | 85-90% |
+| **MMLU-Pro** | 20-35% | 35-50% | 45-60% | 65-75% |
+| **TruthfulQA** | 30-45% | 45-60% | 55-70% | 75-85% |
+| **ARC-Easy** | 60-75% | 75-85% | 85-95% | 95-98% |
+| **ARC-Challenge** | 40-55% | 55-70% | 70-80% | 85-95% |
+| **HellaSwag** | 50-65% | 65-80% | 80-90% | 90-95% |
+| **GPQA** | 25-30% | 30-40% | 40-50% | 50-60% |
+
+### Math & Code Benchmarks
+
+| Benchmark | Small (<7B) | Medium (7-13B) | Large (30-70B) | GPT-4 |
+|-----------|-------------|----------------|----------------|-------|
+| **GSM8K** | 10-30% | 30-50% | 50-70% | 85-95% |
+| **HumanEval** | 10-25% | 25-45% | 45-65% | 70-85% |
+
+**Note**: Performance varies significantly based on model architecture, training data, and specific model versions.
 
 ## 💡 Tips for Best Results
 
 1. **Start small**: Use `--max-samples 10` for quick testing
 2. **Test specific domains**: Use `--subjects` or `--categories` to focus on areas of interest
 3. **Compare systematically**: Keep test conditions consistent across models
-4. **Use both benchmarks**: MMLU for comparison with literature, MMLU-Pro for harder evaluation
-5. **Visualize results**: Use all plot types to understand model strengths/weaknesses
+4. **Mix benchmark types**: Combine multiple-choice (MMLU, ARC), math (GSM8K), and code (HumanEval) for comprehensive evaluation
+5. **Watch for strengths**: Some models excel at reasoning, others at math or coding
+6. **Visualize results**: Use all plot types to understand model strengths/weaknesses
+7. **Be patient**: Full evaluations can take hours (especially HellaSwag with 70K questions)
 
 ## 🐛 Troubleshooting
 

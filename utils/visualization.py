@@ -84,16 +84,50 @@ def extract_subject_accuracies(result: Dict) -> Dict[str, float]:
 
 def detect_benchmark_type(result: Dict) -> str:
     """
-    Detect whether result is from MMLU or MMLU-Pro
+    Detect benchmark type from result file
 
     Args:
         result: Result dictionary
 
     Returns:
-        'mmlu' or 'mmlu-pro'
+        Benchmark type: 'mmlu', 'mmlu-pro', 'truthfulqa', 'arc', 'hellaswag', 'gpqa', 'gsm8k', 'humaneval'
     """
+    # Check for explicit benchmark field
+    if 'benchmark' in result:
+        return result['benchmark'].lower()
+
+    # Check for format field (TruthfulQA)
+    if 'format' in result:
+        return 'truthfulqa'
+
+    # Check for subset field (GPQA)
+    if 'subset' in result and result['subset'].startswith('gpqa'):
+        return 'gpqa'
+
+    # Check for difficulty field (ARC)
+    if 'difficulty' in result and result['difficulty'].startswith('ARC'):
+        return 'arc'
+
+    # Check for pass_at_1 field (HumanEval)
+    if 'pass_at_1' in result:
+        return 'humaneval'
+
+    # Check for dataset_stats with categories (MMLU-Pro)
     if 'dataset_stats' in result and 'categories' in result.get('dataset_stats', {}):
         return 'mmlu-pro'
+
+    # Check for subject_results (MMLU)
+    if 'subject_results' in result:
+        return 'mmlu'
+
+    # Check result count to distinguish (GSM8K has ~1000-8500, HellaSwag has ~70000)
+    total = result.get('total_questions', 0)
+    if total > 50000:
+        return 'hellaswag'
+    elif total > 5000:
+        return 'gsm8k'
+
+    # Default to mmlu
     return 'mmlu'
 
 
