@@ -17,16 +17,19 @@ def load_gpqa_dataset(split: str = "train", subset: str = "gpqa_main"):
 
     Args:
         split: Dataset split ('train' is the main evaluation set)
-        subset: One of 'gpqa_main', 'gpqa_diamond', 'gpqa_extended'
+        subset: One of 'gpqa_main', 'gpqa_diamond', 'gpqa_extended', 'gpqa_experts'
             - gpqa_main: 448 questions (default)
             - gpqa_diamond: 198 highest quality questions
             - gpqa_extended: 546 questions (includes all)
+            - gpqa_experts: Expert-validated subset
 
     Returns:
         Dataset object or None if error
     """
     try:
-        dataset = load_dataset("Idavidrein/gpqa", subset, split=split)
+        # Use Wanfq/gpqa as it's publicly accessible
+        # Original dataset (Idavidrein/gpqa) is gated to prevent data contamination
+        dataset = load_dataset("Wanfq/gpqa", subset, split=split)
         return dataset
     except Exception as e:
         print(f"Error loading GPQA dataset: {e}")
@@ -39,7 +42,7 @@ def parse_gpqa_sample(sample: Dict) -> Tuple[str, List[str], str]:
 
     Args:
         sample: GPQA sample dictionary with fields:
-            - Question: str
+            - Question: str (post-revision, preferred)
             - Correct Answer: str (one of the choice texts)
             - Incorrect Answer 1: str
             - Incorrect Answer 2: str
@@ -48,14 +51,15 @@ def parse_gpqa_sample(sample: Dict) -> Tuple[str, List[str], str]:
     Returns:
         Tuple of (question, choices, correct_answer_letter)
     """
-    question = sample['Question']
+    # Use post-revision question (better quality)
+    question = sample.get('Question', sample.get('Pre-Revision Question', ''))
 
-    # Collect all choices
-    correct_answer = sample['Correct Answer']
+    # Collect all choices (use post-revision answers)
+    correct_answer = sample.get('Correct Answer', sample.get('Pre-Revision Correct Answer', ''))
     incorrect_answers = [
-        sample['Incorrect Answer 1'],
-        sample['Incorrect Answer 2'],
-        sample['Incorrect Answer 3']
+        sample.get('Incorrect Answer 1', sample.get('Pre-Revision Incorrect Answer 1', '')),
+        sample.get('Incorrect Answer 2', sample.get('Pre-Revision Incorrect Answer 2', '')),
+        sample.get('Incorrect Answer 3', sample.get('Pre-Revision Incorrect Answer 3', ''))
     ]
 
     # Combine and shuffle to avoid position bias
