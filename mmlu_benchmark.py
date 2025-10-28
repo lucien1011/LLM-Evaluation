@@ -23,15 +23,18 @@ from utils.mmlu import (
     parse_mmlu_sample,
     DEFAULT_MMLU_SUBJECTS
 )
+from utils.reasoning import ReasoningStrategy, DirectStrategy, create_strategy
+from utils.cot_examples import get_cot_examples
 
 
-def create_mmlu_evaluator(model_name: str, ollama_url: str):
+def create_mmlu_evaluator(model_name: str, ollama_url: str, strategy: ReasoningStrategy):
     """
-    Create an evaluator function for MMLU samples
+    Create an evaluator function for MMLU samples with reasoning strategy
 
     Args:
         model_name: Name of the Ollama model
         ollama_url: URL of the Ollama API
+        strategy: Reasoning strategy to use for prompting
 
     Returns:
         Function that evaluates a single MMLU sample
@@ -41,20 +44,38 @@ def create_mmlu_evaluator(model_name: str, ollama_url: str):
         # Parse the MMLU sample
         question, choices, correct_letter = parse_mmlu_sample(sample)
 
-        # Format the prompt
-        prompt = format_multiple_choice_prompt(question, choices)
+        # Format the prompt using the reasoning strategy
+        instruction = "Answer the following question by selecting the correct option."
+        prompt = strategy.format_prompt(question, choices, instruction)
 
-        # Query the model
-        response = query_ollama(
-            prompt=prompt,
-            model_name=model_name,
-            ollama_url=ollama_url,
-            temperature=0.0,
-            max_tokens=10
-        )
+        # Use longer timeout for CoT reasoning
+        timeout = 180 if strategy.get_max_tokens() > 100 else 60
 
-        # Extract the predicted answer
-        predicted_letter = extract_letter_answer(response)
+        # Handle strategies that require multiple samples
+        if strategy.requires_multiple_samples():
+            responses = []
+            for _ in range(strategy.get_num_samples()):
+                response = query_ollama(
+                    prompt=prompt,
+                    model_name=model_name,
+                    ollama_url=ollama_url,
+                    temperature=strategy.get_temperature(),
+                    max_tokens=strategy.get_max_tokens(),
+                    timeout=timeout
+                )
+                responses.append(response)
+            predicted_letter = strategy.extract_answer_from_multiple(responses, ['A', 'B', 'C', 'D'])
+        else:
+            # Single response
+            response = query_ollama(
+                prompt=prompt,
+                model_name=model_name,
+                ollama_url=ollama_url,
+                temperature=strategy.get_temperature(),
+                max_tokens=strategy.get_max_tokens(),
+                timeout=timeout
+            )
+            predicted_letter = strategy.extract_answer(response, ['A', 'B', 'C', 'D'])
 
         # Check if correct
         is_correct = predicted_letter == correct_letter
@@ -69,7 +90,8 @@ def benchmark_mmlu_subject(
     model_name: str,
     ollama_url: str,
     split: str = "test",
-    max_samples: int = None
+    max_samples: int = None,
+    strategy: ReasoningStrategy = None
 ) -> Dict:
     """
     Benchmark a specific MMLU subject
@@ -80,10 +102,14 @@ def benchmark_mmlu_subject(
         ollama_url: URL of the Ollama API
         split: Dataset split ('test', 'validation', 'dev')
         max_samples: Maximum number of samples to evaluate (None for all)
+        strategy: Reasoning strategy to use (None defaults to DirectStrategy)
 
     Returns:
         Dictionary with evaluation results
     """
+    if strategy is None:
+        strategy = DirectStrategy()
+
     print(f"\nEvaluating subject: {subject}")
 
     # Load the dataset
@@ -92,7 +118,7 @@ def benchmark_mmlu_subject(
         return {"subject": subject, "error": "Failed to load dataset"}
 
     # Create evaluator function
-    evaluator_fn = create_mmlu_evaluator(model_name, ollama_url)
+    evaluator_fn = create_mmlu_evaluator(model_name, ollama_url, strategy)
 
     # Evaluate the dataset
     results = evaluate_dataset(
@@ -114,7 +140,8 @@ def benchmark_mmlu_all(
     ollama_url: str,
     subjects: List[str] = None,
     split: str = "test",
-    max_samples_per_subject: int = None
+    max_samples_per_subject: int = None,
+    strategy: ReasoningStrategy = None
 ) -> Dict:
     """
     Benchmark multiple MMLU subjects
@@ -125,6 +152,7 @@ def benchmark_mmlu_all(
         subjects: List of subjects to benchmark (None for default set)
         split: Dataset split to use
         max_samples_per_subject: Max samples per subject (None for all)
+        strategy: Reasoning strategy to use (None defaults to DirectStrategy)
 
     Returns:
         Dictionary with overall results
@@ -141,7 +169,8 @@ def benchmark_mmlu_all(
             model_name=model_name,
             ollama_url=ollama_url,
             split=split,
-            max_samples=max_samples_per_subject
+            max_samples=max_samples_per_subject,
+            strategy=strategy
         )
         subject_results.append(result)
 
@@ -201,12 +230,34 @@ def main():
         help="Output file for results (default: mmlu_results.json)"
     )
 
+    # Reasoning strategy arguments
+    parser.add_argument(
+        "--reasoning",
+        type=str,
+        default="direct",
+        choices=["direct", "zero-shot-cot", "few-shot-cot", "self-consistency"],
+        help="Reasoning strategy to use (default: direct)"
+    )
+    parser.add_argument(
+        "--cot-examples",
+        type=int,
+        default=3,
+        help="Number of examples for few-shot CoT (default: 3)"
+    )
+    parser.add_argument(
+        "--sc-samples",
+        type=int,
+        default=5,
+        help="Number of samples for self-consistency (default: 5)"
+    )
+
     args = parser.parse_args()
 
     print(f"Starting MMLU Benchmark")
     print(f"Model: {args.model}")
     print(f"Ollama URL: {args.url}")
     print(f"Split: {args.split}")
+    print(f"Reasoning strategy: {args.reasoning}")
     if args.max_samples:
         print(f"Max samples per subject: {args.max_samples}")
     print("-" * 50)
@@ -219,14 +270,29 @@ def main():
 
     print("Ollama API is accessible")
 
+    # Create reasoning strategy
+    if args.reasoning == "few-shot-cot":
+        examples = get_cot_examples('mmlu', n=args.cot_examples)
+        strategy = create_strategy('few-shot-cot', examples=examples)
+    elif args.reasoning == "self-consistency":
+        strategy = create_strategy('self-consistency', base_strategy='zero-shot-cot', n_samples=args.sc_samples)
+    else:
+        strategy = create_strategy(args.reasoning)
+
+    print(f"Using reasoning strategy: {strategy.__class__.__name__}")
+
     # Run benchmark
     results = benchmark_mmlu_all(
         model_name=args.model,
         ollama_url=args.url,
         subjects=args.subjects,
         split=args.split,
-        max_samples_per_subject=args.max_samples
+        max_samples_per_subject=args.max_samples,
+        strategy=strategy
     )
+
+    # Add reasoning strategy to results
+    results['reasoning_strategy'] = args.reasoning
 
     # Save results
     output_path = save_results(results, args.output)

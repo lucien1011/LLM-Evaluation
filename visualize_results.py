@@ -358,6 +358,282 @@ def plot_heatmap_comparison(
     plt.close()
 
 
+# ============================================================================
+# New Plotting Functions for Reasoning Method Comparisons
+# ============================================================================
+
+def plot_reasoning_comparison(
+    data: Dict[str, Dict[str, Dict]],
+    model: str,
+    benchmark: str,
+    output_path: Path
+):
+    """
+    Compare reasoning methods for a single model
+
+    Args:
+        data: {reasoning_method: {model: result_dict}}
+        model: Model to analyze
+        benchmark: Benchmark name
+        output_path: Where to save plot
+    """
+    from utils.visualization import setup_plot_style, extract_overall_accuracy, get_color_palette
+
+    setup_plot_style()
+
+    reasoning_methods = []
+    accuracies = []
+
+    for reasoning_method, models_dict in data.items():
+        if model in models_dict:
+            reasoning_methods.append(reasoning_method)
+            accuracy = extract_overall_accuracy(models_dict[model])
+            accuracies.append(accuracy)
+
+    if not reasoning_methods:
+        print(f"No data found for model: {model}")
+        return
+
+    # Sort by accuracy (descending)
+    sorted_data = sorted(zip(reasoning_methods, accuracies), key=lambda x: x[1], reverse=True)
+    reasoning_methods, accuracies = zip(*sorted_data)
+
+    # Create plot
+    fig, ax = plt.subplots(figsize=(10, 6))
+    colors = get_color_palette(len(reasoning_methods))
+    bars = ax.bar(range(len(reasoning_methods)), accuracies, color=colors, alpha=0.8, edgecolor='black', linewidth=1.5)
+
+    # Add value labels on bars
+    for bar, acc in zip(bars, accuracies):
+        height = bar.get_height()
+        ax.text(bar.get_x() + bar.get_width()/2., height + 1,
+                f'{acc:.1f}%', ha='center', va='bottom', fontweight='bold', fontsize=10)
+
+    ax.set_xlabel('Reasoning Method', fontweight='bold')
+    ax.set_ylabel('Accuracy (%)', fontweight='bold')
+    ax.set_title(f'{benchmark.upper()} - {model} Performance Across Reasoning Methods',
+                fontweight='bold', fontsize=14, pad=20)
+    ax.set_xticks(range(len(reasoning_methods)))
+    ax.set_xticklabels(reasoning_methods, rotation=45, ha='right')
+    ax.set_ylim(0, 100)
+    ax.grid(axis='y', alpha=0.3, linestyle='--')
+
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    print(f"Saved reasoning comparison plot to: {output_path}")
+    plt.close()
+
+
+def plot_model_comparison_by_reasoning(
+    data: Dict[str, Dict[str, Dict]],
+    reasoning_method: str,
+    benchmark: str,
+    output_path: Path
+):
+    """
+    Compare models for a single reasoning method
+
+    Args:
+        data: {reasoning_method: {model: result_dict}}
+        reasoning_method: Reasoning method to analyze
+        benchmark: Benchmark name
+        output_path: Where to save plot
+    """
+    from utils.visualization import setup_plot_style, extract_overall_accuracy, get_color_palette
+
+    setup_plot_style()
+
+    if reasoning_method not in data:
+        print(f"No data found for reasoning method: {reasoning_method}")
+        return
+
+    models_dict = data[reasoning_method]
+    models = list(models_dict.keys())
+    accuracies = [extract_overall_accuracy(models_dict[m]) for m in models]
+
+    # Sort by accuracy (descending)
+    sorted_data = sorted(zip(models, accuracies), key=lambda x: x[1], reverse=True)
+    models, accuracies = zip(*sorted_data)
+
+    # Create plot
+    fig, ax = plt.subplots(figsize=(10, 6))
+    colors = get_color_palette(len(models))
+    bars = ax.bar(range(len(models)), accuracies, color=colors, alpha=0.8, edgecolor='black', linewidth=1.5)
+
+    # Add value labels on bars
+    for bar, acc in zip(bars, accuracies):
+        height = bar.get_height()
+        ax.text(bar.get_x() + bar.get_width()/2., height + 1,
+                f'{acc:.1f}%', ha='center', va='bottom', fontweight='bold', fontsize=10)
+
+    ax.set_xlabel('Model', fontweight='bold')
+    ax.set_ylabel('Accuracy (%)', fontweight='bold')
+    title_method = reasoning_method.replace('-', ' ').title()
+    ax.set_title(f'{benchmark.upper()} - Model Comparison ({title_method})',
+                fontweight='bold', fontsize=14, pad=20)
+    ax.set_xticks(range(len(models)))
+    ax.set_xticklabels(models, rotation=45, ha='right')
+    ax.set_ylim(0, 100)
+    ax.grid(axis='y', alpha=0.3, linestyle='--')
+
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    print(f"Saved model comparison plot to: {output_path}")
+    plt.close()
+
+
+def plot_matrix_heatmap(
+    data: Dict[str, Dict[str, Dict]],
+    benchmark: str,
+    output_path: Path
+):
+    """
+    Create heatmap showing all model × reasoning combinations
+
+    Args:
+        data: {reasoning_method: {model: result_dict}}
+        benchmark: Benchmark name
+        output_path: Where to save plot
+    """
+    from utils.visualization import setup_plot_style, extract_overall_accuracy
+
+    setup_plot_style()
+
+    # Extract all unique models and reasoning methods
+    all_models = set()
+    for models_dict in data.values():
+        all_models.update(models_dict.keys())
+
+    models = sorted(all_models)
+    reasoning_methods = sorted(data.keys())
+
+    # Create matrix
+    matrix = np.zeros((len(models), len(reasoning_methods)))
+
+    for j, reasoning_method in enumerate(reasoning_methods):
+        for i, model in enumerate(models):
+            if model in data[reasoning_method]:
+                accuracy = extract_overall_accuracy(data[reasoning_method][model])
+                matrix[i, j] = accuracy
+            else:
+                matrix[i, j] = np.nan
+
+    # Create heatmap
+    fig, ax = plt.subplots(figsize=(12, max(8, len(models) * 0.5)))
+    im = ax.imshow(matrix, cmap='RdYlGn', aspect='auto', vmin=0, vmax=100)
+
+    # Add colorbar
+    cbar = plt.colorbar(im, ax=ax)
+    cbar.set_label('Accuracy (%)', rotation=270, labelpad=20, fontweight='bold')
+
+    # Add text annotations
+    for i in range(len(models)):
+        for j in range(len(reasoning_methods)):
+            if not np.isnan(matrix[i, j]):
+                text = ax.text(j, i, f'{matrix[i, j]:.1f}%',
+                             ha="center", va="center", color="black", fontweight='bold', fontsize=9)
+
+    # Labels
+    reasoning_labels = [r.replace('-', '\n') for r in reasoning_methods]  # Break long names
+    ax.set_xticks(range(len(reasoning_methods)))
+    ax.set_yticks(range(len(models)))
+    ax.set_xticklabels(reasoning_labels, rotation=0, ha='center')
+    ax.set_yticklabels(models)
+    ax.set_xlabel('Reasoning Method', fontweight='bold', fontsize=12)
+    ax.set_ylabel('Model', fontweight='bold', fontsize=12)
+    ax.set_title(f'{benchmark.upper()} - Performance Matrix (Model × Reasoning Method)',
+                fontweight='bold', fontsize=14, pad=20)
+
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    print(f"Saved matrix heatmap to: {output_path}")
+    plt.close()
+
+
+def plot_improvement_chart(
+    data: Dict[str, Dict[str, Dict]],
+    benchmark: str,
+    output_path: Path,
+    baseline: str = 'direct'
+):
+    """
+    Show improvement of CoT methods over baseline
+
+    Args:
+        data: {reasoning_method: {model: result_dict}}
+        benchmark: Benchmark name
+        output_path: Where to save plot
+        baseline: Baseline reasoning method (default: 'direct')
+    """
+    from utils.visualization import setup_plot_style, extract_overall_accuracy, get_color_palette
+
+    setup_plot_style()
+
+    if baseline not in data:
+        print(f"Warning: Baseline '{baseline}' not found in results")
+        return
+
+    # Get all models that have baseline results
+    baseline_models = set(data[baseline].keys())
+
+    # Filter to models that exist in baseline
+    models = sorted(baseline_models)
+
+    # Calculate improvements for each reasoning method
+    reasoning_methods = [r for r in sorted(data.keys()) if r != baseline]
+    improvements = {r: [] for r in reasoning_methods}
+
+    for model in models:
+        baseline_acc = extract_overall_accuracy(data[baseline][model])
+
+        for reasoning_method in reasoning_methods:
+            if model in data[reasoning_method]:
+                method_acc = extract_overall_accuracy(data[reasoning_method][model])
+                improvement = method_acc - baseline_acc
+                improvements[reasoning_method].append(improvement)
+            else:
+                improvements[reasoning_method].append(0)
+
+    # Create grouped bar chart
+    fig, ax = plt.subplots(figsize=(12, 6))
+
+    x = np.arange(len(models))
+    width = 0.8 / len(reasoning_methods) if reasoning_methods else 0.8
+
+    colors = get_color_palette(len(reasoning_methods))
+
+    for i, reasoning_method in enumerate(reasoning_methods):
+        offset = width * i - (width * (len(reasoning_methods) - 1) / 2)
+        method_label = reasoning_method.replace('-', ' ').title()
+        bars = ax.bar(x + offset, improvements[reasoning_method],
+                     width, label=method_label, color=colors[i], alpha=0.8, edgecolor='black', linewidth=1)
+
+        # Add value labels
+        for bar in bars:
+            height = bar.get_height()
+            if abs(height) > 0.5:  # Only label if improvement is significant
+                ax.text(bar.get_x() + bar.get_width()/2., height,
+                       f'{height:+.1f}%',
+                       ha='center', va='bottom' if height > 0 else 'top',
+                       fontsize=8, fontweight='bold')
+
+    ax.set_xlabel('Model', fontweight='bold', fontsize=12)
+    ax.set_ylabel('Accuracy Improvement Over Direct (%)', fontweight='bold', fontsize=12)
+    baseline_title = baseline.replace('-', ' ').title()
+    ax.set_title(f'{benchmark.upper()} - CoT Improvement Over {baseline_title}',
+                fontweight='bold', fontsize=14, pad=20)
+    ax.set_xticks(x)
+    ax.set_xticklabels(models, rotation=45, ha='right')
+    ax.axhline(y=0, color='black', linestyle='-', linewidth=1.5)
+    ax.grid(axis='y', alpha=0.3, linestyle='--')
+    ax.legend(loc='best', framealpha=0.9)
+
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    print(f"Saved improvement chart to: {output_path}")
+    plt.close()
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Visualize benchmark results across models",

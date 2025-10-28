@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 import numpy as np
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Optional
 from datetime import datetime
 
 
@@ -257,3 +257,184 @@ def setup_plot_style():
     plt.rcParams['xtick.labelsize'] = 9
     plt.rcParams['ytick.labelsize'] = 9
     plt.rcParams['legend.fontsize'] = 9
+
+
+# ============================================================================
+# Enhanced Discovery Functions for Nested Structure (Reasoning Methods)
+# ============================================================================
+
+def detect_directory_structure(base_dir: Path) -> str:
+    """
+    Detect if directory structure is nested (by reasoning method) or flat
+
+    Args:
+        base_dir: Base directory to check
+
+    Returns:
+        'nested' if has subdirectories like direct/, zero-shot-cot/
+        'flat' if JSON files are directly in base_dir
+    """
+    if not base_dir.exists():
+        return 'flat'
+
+    # Check for JSON files directly in base_dir
+    json_files = list(base_dir.glob('*.json'))
+    if json_files:
+        return 'flat'
+
+    # Check for subdirectories
+    subdirs = [d for d in base_dir.iterdir() if d.is_dir()]
+    if not subdirs:
+        return 'flat'
+
+    # Check if subdirectories have names matching reasoning methods
+    reasoning_dirs = {'direct', 'zero-shot-cot', 'few-shot-cot', 'self-consistency'}
+    found_reasoning_dirs = {d.name for d in subdirs}
+
+    if reasoning_dirs & found_reasoning_dirs:  # Intersection exists
+        return 'nested'
+
+    return 'flat'
+
+
+def discover_nested_results(base_dir: Path) -> Dict[str, List[Path]]:
+    """
+    Discover results in nested structure
+
+    Args:
+        base_dir: Base directory containing reasoning method subdirectories
+
+    Returns:
+        {
+            'reasoning_method': [list of all result JSON files]
+        }
+
+    Example:
+        {
+            'direct': [Path('output/json/direct/arc_gemma3_27b.json'), ...],
+            'zero-shot-cot': [Path('output/json/zero-shot-cot/arc_gemma3_27b.json'), ...]
+        }
+    """
+    results = {}
+
+    for reasoning_dir in base_dir.iterdir():
+        if reasoning_dir.is_dir():
+            reasoning_method = reasoning_dir.name
+            json_files = list(reasoning_dir.glob('*.json'))
+            if json_files:
+                results[reasoning_method] = json_files
+
+    return results
+
+
+def load_results_for_comparison(
+    base_dir: Path,
+    benchmark: str,
+    models: Optional[List[str]] = None,
+    reasoning_methods: Optional[List[str]] = None
+) -> Dict[str, Dict[str, Dict]]:
+    """
+    Load results for comparison across reasoning methods and models
+
+    Args:
+        base_dir: Base directory (either flat or with reasoning method subdirs)
+        benchmark: Benchmark name to filter (e.g., 'arc', 'gpqa', 'mmlu')
+        models: Optional list of specific models to include
+        reasoning_methods: Optional list of specific reasoning methods to include
+
+    Returns:
+        {
+            'reasoning_method': {
+                'model_name': result_dict
+            }
+        }
+
+    Example:
+        {
+            'direct': {
+                'gemma3:27b': {...},
+                'gemma3:4b': {...}
+            },
+            'zero-shot-cot': {
+                'gemma3:27b': {...},
+                'gemma3:4b': {...}
+            }
+        }
+    """
+    structure = detect_directory_structure(base_dir)
+
+    if structure == 'nested':
+        nested_results = discover_nested_results(base_dir)
+
+        # Filter by reasoning methods if specified
+        if reasoning_methods:
+            nested_results = {
+                k: v for k, v in nested_results.items()
+                if k in reasoning_methods
+            }
+
+        # Load and filter results
+        comparison_data = {}
+        for reasoning_method, files in nested_results.items():
+            comparison_data[reasoning_method] = {}
+
+            for filepath in files:
+                try:
+                    result = load_result_file(str(filepath))
+                    result_benchmark = detect_benchmark_type(result)
+
+                    # Filter by benchmark
+                    if result_benchmark != benchmark:
+                        continue
+
+                    model = extract_model_name(result)
+
+                    # Filter by models if specified
+                    if models and model not in models:
+                        continue
+
+                    comparison_data[reasoning_method][model] = result
+
+                except Exception as e:
+                    print(f"Error loading {filepath}: {e}")
+
+        # Remove empty reasoning methods
+        comparison_data = {k: v for k, v in comparison_data.items() if v}
+
+        return comparison_data
+
+    else:  # flat structure - backward compatible
+        files = list(base_dir.glob('*.json'))
+        results = {}
+
+        for filepath in files:
+            try:
+                result = load_result_file(str(filepath))
+                result_benchmark = detect_benchmark_type(result)
+
+                if result_benchmark != benchmark:
+                    continue
+
+                model = extract_model_name(result)
+
+                if models and model not in models:
+                    continue
+
+                results[model] = result
+
+            except Exception as e:
+                print(f"Error loading {filepath}: {e}")
+
+        # Treat flat structure as 'direct' reasoning method
+        # Or try to extract from result if available
+        reasoning_method = 'direct'
+        if results:
+            # Check if any result has reasoning_strategy field
+            first_result = next(iter(results.values()))
+            if 'reasoning_strategy' in first_result:
+                reasoning_method = first_result.get('reasoning_strategy', 'direct').lower()
+                # Clean up strategy name
+                if 'strategy' in reasoning_method:
+                    reasoning_method = reasoning_method.replace('strategy', '').strip()
+
+        return {reasoning_method: results}

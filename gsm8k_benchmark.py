@@ -22,20 +22,70 @@ from utils.gsm8k import (
     get_dataset_stats,
     format_gsm8k_instruction
 )
+from utils.reasoning import ReasoningStrategy, DirectStrategy, create_strategy
+from utils.cot_examples import get_cot_examples
 
 
-def create_gsm8k_evaluator(model_name: str, ollama_url: str):
-    """Create an evaluator function for GSM8K samples"""
+def create_gsm8k_evaluator(model_name: str, ollama_url: str, strategy: ReasoningStrategy):
+    """Create an evaluator function for GSM8K samples with reasoning strategy"""
     def evaluate_gsm8k_sample(sample: Dict) -> Tuple[bool, str, str]:
         question, correct_answer = parse_gsm8k_sample(sample)
 
         instruction = format_gsm8k_instruction()
-        prompt = f"{instruction}\n\n{question}"
 
-        # Allow more tokens for math reasoning
-        response = query_ollama(prompt, model_name, ollama_url, temperature=0.0, max_tokens=512)
+        # For math problems, we adapt the strategy formatting
+        # GSM8K doesn't use multiple choice, so we need special handling
+        if hasattr(strategy, 'cot_trigger'):
+            # Zero-shot CoT: add trigger to instruction
+            prompt = f"{instruction}\n\n{question}\n\n{strategy.cot_trigger}"
+        elif hasattr(strategy, 'examples'):
+            # Few-shot CoT: format with examples
+            examples_text = get_cot_examples('gsm8k', n=len(strategy.examples))
+            from utils.cot_examples import format_cot_example
+            formatted_examples = [format_cot_example(ex, 'gsm8k') for ex in examples_text]
+            examples_str = '\n\n---\n\n'.join(formatted_examples)
+            prompt = f"{instruction}\n\n{examples_str}\n\n---\n\nQuestion: {question}"
+        else:
+            # Direct strategy
+            prompt = f"{instruction}\n\n{question}"
 
-        predicted_answer = extract_numerical_answer(response)
+        # Use longer timeout for CoT reasoning
+        timeout = 180 if strategy.get_max_tokens() > 100 else 60
+
+        # Handle strategies that require multiple samples
+        if strategy.requires_multiple_samples():
+            responses = []
+            for _ in range(strategy.get_num_samples()):
+                response = query_ollama(
+                    prompt, model_name, ollama_url,
+                    temperature=strategy.get_temperature(),
+                    max_tokens=strategy.get_max_tokens(),
+                    timeout=timeout
+                )
+                responses.append(response)
+
+            # Extract numerical answers from all responses
+            predicted_answers = [extract_numerical_answer(r) for r in responses]
+            # Use majority voting
+            from collections import Counter
+            answer_counts = Counter(str(a) for a in predicted_answers if a is not None)
+            if answer_counts:
+                most_common_str = answer_counts.most_common(1)[0][0]
+                try:
+                    predicted_answer = float(most_common_str)
+                except:
+                    predicted_answer = None
+            else:
+                predicted_answer = None
+        else:
+            # Single response
+            response = query_ollama(
+                prompt, model_name, ollama_url,
+                temperature=strategy.get_temperature(),
+                max_tokens=strategy.get_max_tokens(),
+                timeout=timeout
+            )
+            predicted_answer = extract_numerical_answer(response)
 
         # Compare numerical answers
         is_correct = compare_numerical_answers(predicted_answer, correct_answer)
@@ -50,8 +100,11 @@ def create_gsm8k_evaluator(model_name: str, ollama_url: str):
 
 
 def benchmark_gsm8k(model_name: str, ollama_url: str, split: str = "test",
-                    max_samples: int = None) -> Dict:
+                    max_samples: int = None, strategy: ReasoningStrategy = None) -> Dict:
     """Benchmark GSM8K"""
+    if strategy is None:
+        strategy = DirectStrategy()
+
     print(f"\nEvaluating GSM8K")
 
     dataset = load_gsm8k_dataset(split)
@@ -61,7 +114,7 @@ def benchmark_gsm8k(model_name: str, ollama_url: str, split: str = "test",
     stats = get_dataset_stats(dataset)
     print(f"Total questions: {stats['total_samples']}")
 
-    evaluator_fn = create_gsm8k_evaluator(model_name, ollama_url)
+    evaluator_fn = create_gsm8k_evaluator(model_name, ollama_url, strategy)
     start_time = time.time()
 
     results = evaluate_dataset(dataset, evaluator_fn, max_samples, delay=0.1,
@@ -88,17 +141,53 @@ def main():
     parser.add_argument("--max-samples", type=int, default=None)
     parser.add_argument("--output", type=str, default="gsm8k_results.json")
 
+    # Reasoning strategy arguments
+    parser.add_argument(
+        "--reasoning",
+        type=str,
+        default="direct",
+        choices=["direct", "zero-shot-cot", "few-shot-cot", "self-consistency"],
+        help="Reasoning strategy to use (default: direct)"
+    )
+    parser.add_argument(
+        "--cot-examples",
+        type=int,
+        default=3,
+        help="Number of examples for few-shot CoT (default: 3)"
+    )
+    parser.add_argument(
+        "--sc-samples",
+        type=int,
+        default=5,
+        help="Number of samples for self-consistency (default: 5)"
+    )
+
     args = parser.parse_args()
 
     print(f"Starting GSM8K Benchmark")
     print(f"Model: {args.model}")
+    print(f"Reasoning strategy: {args.reasoning}")
     print("-" * 50)
 
     if not check_ollama_connection(args.url):
         print(f"Error: Cannot connect to Ollama at {args.url}")
         return
 
-    results = benchmark_gsm8k(args.model, args.url, args.split, args.max_samples)
+    # Create reasoning strategy
+    if args.reasoning == "few-shot-cot":
+        examples = get_cot_examples('gsm8k', n=args.cot_examples)
+        strategy = create_strategy('few-shot-cot', examples=examples)
+    elif args.reasoning == "self-consistency":
+        strategy = create_strategy('self-consistency', base_strategy='zero-shot-cot', n_samples=args.sc_samples)
+    else:
+        strategy = create_strategy(args.reasoning)
+
+    print(f"Using reasoning strategy: {strategy.__class__.__name__}")
+
+    results = benchmark_gsm8k(args.model, args.url, args.split, args.max_samples, strategy)
+
+    # Add reasoning strategy to results
+    results['reasoning_strategy'] = args.reasoning
 
     if "error" in results:
         print(f"Error: {results['error']}")

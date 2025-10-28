@@ -33,15 +33,18 @@ from utils.truthfulqa import (
     format_truthfulqa_instruction,
     TRUTHFULQA_CATEGORIES
 )
+from utils.reasoning import ReasoningStrategy, DirectStrategy, create_strategy
+from utils.cot_examples import get_cot_examples
 
 
-def create_truthfulqa_mc1_evaluator(model_name: str, ollama_url: str):
+def create_truthfulqa_mc1_evaluator(model_name: str, ollama_url: str, strategy: ReasoningStrategy):
     """
-    Create an evaluator function for TruthfulQA MC1 (single correct answer)
+    Create an evaluator function for TruthfulQA MC1 with reasoning strategy
 
     Args:
         model_name: Name of the Ollama model
         ollama_url: URL of the Ollama API
+        strategy: Reasoning strategy to use for prompting
 
     Returns:
         Function that evaluates a single TruthfulQA MC1 sample
@@ -54,24 +57,41 @@ def create_truthfulqa_mc1_evaluator(model_name: str, ollama_url: str):
         # Get custom instruction for truthfulness
         instruction = format_truthfulqa_instruction("mc1")
 
-        # Format the prompt
-        prompt = format_multiple_choice_prompt(question, choices, instruction)
+        # Format the prompt using the reasoning strategy
+        prompt = strategy.format_prompt(question, choices, instruction)
 
-        # Query the model
-        response = query_ollama(
-            prompt=prompt,
-            model_name=model_name,
-            ollama_url=ollama_url,
-            temperature=0.0,
-            max_tokens=10
-        )
+        # Use longer timeout for CoT reasoning
+        timeout = 180 if strategy.get_max_tokens() > 100 else 60
 
-        # Extract the predicted answer
         # Determine valid choices based on number of options
         num_choices = len(choices)
         valid_choices = [chr(65 + i) for i in range(num_choices)]  # A, B, C, D, ...
 
-        predicted_letter = extract_letter_answer(response, valid_choices)
+        # Handle strategies that require multiple samples
+        if strategy.requires_multiple_samples():
+            responses = []
+            for _ in range(strategy.get_num_samples()):
+                response = query_ollama(
+                    prompt=prompt,
+                    model_name=model_name,
+                    ollama_url=ollama_url,
+                    temperature=strategy.get_temperature(),
+                    max_tokens=strategy.get_max_tokens(),
+                    timeout=timeout
+                )
+                responses.append(response)
+            predicted_letter = strategy.extract_answer_from_multiple(responses, valid_choices)
+        else:
+            # Single response
+            response = query_ollama(
+                prompt=prompt,
+                model_name=model_name,
+                ollama_url=ollama_url,
+                temperature=strategy.get_temperature(),
+                max_tokens=strategy.get_max_tokens(),
+                timeout=timeout
+            )
+            predicted_letter = strategy.extract_answer(response, valid_choices)
 
         # Check if correct
         is_correct = predicted_letter == correct_letter
@@ -81,13 +101,14 @@ def create_truthfulqa_mc1_evaluator(model_name: str, ollama_url: str):
     return evaluate_truthfulqa_mc1_sample
 
 
-def create_truthfulqa_mc2_evaluator(model_name: str, ollama_url: str):
+def create_truthfulqa_mc2_evaluator(model_name: str, ollama_url: str, strategy: ReasoningStrategy):
     """
-    Create an evaluator function for TruthfulQA MC2 (multiple correct answers)
+    Create an evaluator function for TruthfulQA MC2 with reasoning strategy
 
     Args:
         model_name: Name of the Ollama model
         ollama_url: URL of the Ollama API
+        strategy: Reasoning strategy to use for prompting
 
     Returns:
         Function that evaluates a single TruthfulQA MC2 sample
@@ -100,27 +121,51 @@ def create_truthfulqa_mc2_evaluator(model_name: str, ollama_url: str):
         # Get custom instruction
         instruction = format_truthfulqa_instruction("mc2")
 
-        # Format the prompt
-        prompt = format_multiple_choice_prompt(question, choices, instruction)
+        # Format the prompt using the reasoning strategy
+        prompt = strategy.format_prompt(question, choices, instruction)
 
-        # Query the model
-        response = query_ollama(
-            prompt=prompt,
-            model_name=model_name,
-            ollama_url=ollama_url,
-            temperature=0.0,
-            max_tokens=20  # More tokens for multiple answers
-        )
+        # Use longer timeout for CoT reasoning
+        timeout = 180 if strategy.get_max_tokens() > 100 else 60
 
         # Extract predicted answers (could be multiple)
         num_choices = len(choices)
         valid_choices = [chr(65 + i) for i in range(num_choices)]
 
-        # Extract all letter answers from response
-        predicted_letters = []
-        for char in response.upper():
-            if char in valid_choices and char not in predicted_letters:
-                predicted_letters.append(char)
+        # Handle strategies that require multiple samples
+        if strategy.requires_multiple_samples():
+            responses = []
+            for _ in range(strategy.get_num_samples()):
+                response = query_ollama(
+                    prompt=prompt,
+                    model_name=model_name,
+                    ollama_url=ollama_url,
+                    temperature=strategy.get_temperature(),
+                    max_tokens=strategy.get_max_tokens(),
+                    timeout=timeout
+                )
+                responses.append(response)
+            # For MC2, aggregate all responses
+            all_predicted = []
+            for resp in responses:
+                for char in resp.upper():
+                    if char in valid_choices and char not in all_predicted:
+                        all_predicted.append(char)
+            predicted_letters = all_predicted
+        else:
+            # Single response
+            response = query_ollama(
+                prompt=prompt,
+                model_name=model_name,
+                ollama_url=ollama_url,
+                temperature=strategy.get_temperature(),
+                max_tokens=strategy.get_max_tokens(),
+                timeout=timeout
+            )
+            # Extract all letter answers from response
+            predicted_letters = []
+            for char in response.upper():
+                if char in valid_choices and char not in predicted_letters:
+                    predicted_letters.append(char)
 
         # For MC2, we consider it correct if they got at least one correct answer
         # and didn't select any incorrect ones (strict evaluation)
@@ -142,7 +187,8 @@ def benchmark_truthfulqa(
     ollama_url: str,
     format_type: str = "mc1",
     categories: List[str] = None,
-    max_samples: int = None
+    max_samples: int = None,
+    strategy: ReasoningStrategy = None
 ) -> Dict:
     """
     Benchmark TruthfulQA
@@ -184,10 +230,13 @@ def benchmark_truthfulqa(
         print(f"Categories: {stats['num_categories']}")
 
     # Create evaluator based on format type
+    if strategy is None:
+        strategy = DirectStrategy()
+
     if format_type == "mc1":
-        evaluator_fn = create_truthfulqa_mc1_evaluator(model_name, ollama_url)
+        evaluator_fn = create_truthfulqa_mc1_evaluator(model_name, ollama_url, strategy)
     else:
-        evaluator_fn = create_truthfulqa_mc2_evaluator(model_name, ollama_url)
+        evaluator_fn = create_truthfulqa_mc2_evaluator(model_name, ollama_url, strategy)
 
     # Evaluate
     start_time = time.time()
@@ -276,12 +325,34 @@ Examples:
         help="Output file for results (default: truthfulqa_results.json)"
     )
 
+    # Reasoning strategy arguments
+    parser.add_argument(
+        "--reasoning",
+        type=str,
+        default="direct",
+        choices=["direct", "zero-shot-cot", "few-shot-cot", "self-consistency"],
+        help="Reasoning strategy to use (default: direct)"
+    )
+    parser.add_argument(
+        "--cot-examples",
+        type=int,
+        default=3,
+        help="Number of examples for few-shot CoT (default: 3)"
+    )
+    parser.add_argument(
+        "--sc-samples",
+        type=int,
+        default=5,
+        help="Number of samples for self-consistency (default: 5)"
+    )
+
     args = parser.parse_args()
 
     print(f"Starting TruthfulQA Benchmark")
     print(f"Model: {args.model}")
     print(f"Format: {args.format.upper()}")
     print(f"Ollama URL: {args.url}")
+    print(f"Reasoning strategy: {args.reasoning}")
     if args.max_samples:
         print(f"Max samples: {args.max_samples}")
     if args.categories:
@@ -296,14 +367,29 @@ Examples:
 
     print("Ollama API is accessible")
 
+    # Create reasoning strategy
+    if args.reasoning == "few-shot-cot":
+        examples = get_cot_examples('truthfulqa', n=args.cot_examples)
+        strategy = create_strategy('few-shot-cot', examples=examples)
+    elif args.reasoning == "self-consistency":
+        strategy = create_strategy('self-consistency', base_strategy='zero-shot-cot', n_samples=args.sc_samples)
+    else:
+        strategy = create_strategy(args.reasoning)
+
+    print(f"Using reasoning strategy: {strategy.__class__.__name__}")
+
     # Run benchmark
     results = benchmark_truthfulqa(
         model_name=args.model,
         ollama_url=args.url,
         format_type=args.format,
         categories=args.categories,
-        max_samples=args.max_samples
+        max_samples=args.max_samples,
+        strategy=strategy
     )
+
+    # Add reasoning strategy to results
+    results['reasoning_strategy'] = args.reasoning
 
     if "error" in results:
         print(f"Error: {results['error']}")
