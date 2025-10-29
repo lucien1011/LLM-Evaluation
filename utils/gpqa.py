@@ -51,6 +51,9 @@ def parse_gpqa_sample(sample: Dict) -> Tuple[str, List[str], str]:
     Returns:
         Tuple of (question, choices, correct_answer_letter)
     """
+    import random
+    import hashlib
+
     # Use post-revision question (better quality)
     question = sample.get('Question', sample.get('Pre-Revision Question', ''))
 
@@ -62,15 +65,24 @@ def parse_gpqa_sample(sample: Dict) -> Tuple[str, List[str], str]:
         sample.get('Incorrect Answer 3', sample.get('Pre-Revision Incorrect Answer 3', ''))
     ]
 
-    # Combine and shuffle to avoid position bias
-    # Put correct answer first, then incorrect ones
-    choices = [correct_answer] + incorrect_answers
+    # Combine all choices
+    all_choices = [correct_answer] + incorrect_answers
 
-    # The correct answer is at index 0 (we put it first)
+    # Shuffle deterministically based on question hash
+    # This ensures: 1) Same question always has same order, 2) Different questions have different orders
+    question_hash = hashlib.md5(question.encode('utf-8')).hexdigest()
+    seed = int(question_hash[:8], 16)  # Use first 8 hex chars as seed
+    rng = random.Random(seed)
+    rng.shuffle(all_choices)
+
+    # Find the index of the correct answer after shuffling
+    correct_index = all_choices.index(correct_answer)
+
+    # Convert index to letter
     from .prompts import index_to_letter
-    correct_letter = index_to_letter(0)
+    correct_letter = index_to_letter(correct_index)
 
-    return question, choices, correct_letter
+    return question, all_choices, correct_letter
 
 
 def get_dataset_stats(dataset) -> Dict:

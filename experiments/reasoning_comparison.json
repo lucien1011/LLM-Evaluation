@@ -1,0 +1,18 @@
+{
+  "description": "Compare different reasoning methods on challenging benchmarks",
+  "models": [
+    "gemma3:1b"
+  ],
+  "reasoning_methods": [
+    "direct",
+    "zero-shot-cot",
+    "few-shot-cot",
+    "self-consistency"
+  ],
+  "benchmarks": [
+    "gpqa"
+  ],
+  "max_tokens": 32000,
+  "ollama_url": "http://localhost:11434",
+  "output_dir": "output/results/reasoning_comparison_251031_gemma3_1b"
+}

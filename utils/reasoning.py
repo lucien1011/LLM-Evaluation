@@ -17,6 +17,15 @@ from collections import Counter
 class ReasoningStrategy(ABC):
     """Base class for reasoning strategies"""
 
+    def __init__(self, max_tokens: Optional[int] = None):
+        """
+        Initialize reasoning strategy
+
+        Args:
+            max_tokens: Maximum tokens for model response (default: 32000)
+        """
+        self.max_tokens = max_tokens if max_tokens is not None else 32000
+
     @abstractmethod
     def format_prompt(self, question: str, choices: List[str],
                      instruction: str = None) -> str:
@@ -48,8 +57,8 @@ class ReasoningStrategy(ABC):
         pass
 
     def get_max_tokens(self) -> int:
-        """Return recommended max_tokens for this strategy"""
-        return 100
+        """Return configured max_tokens for this strategy"""
+        return self.max_tokens
 
     def get_temperature(self) -> float:
         """Return recommended temperature for this strategy"""
@@ -71,17 +80,21 @@ class DirectStrategy(ReasoningStrategy):
     Prompts the model to answer immediately with just the letter.
     """
 
+    def __init__(self, max_tokens: Optional[int] = None):
+        """
+        Args:
+            max_tokens: Maximum tokens for model response (default: 32000)
+        """
+        super().__init__(max_tokens)
+
     def format_prompt(self, question: str, choices: List[str],
                      instruction: str = None) -> str:
         from .prompts import format_multiple_choice_prompt
-        return format_multiple_choice_prompt(question, choices, instruction)
+        return format_multiple_choice_prompt(question, choices, instruction, use_boxed=True)
 
     def extract_answer(self, response: str, valid_choices: List[str]) -> Optional[str]:
-        from .prompts import extract_letter_answer
-        return extract_letter_answer(response, valid_choices)
-
-    def get_max_tokens(self) -> int:
-        return 100
+        from .prompts import extract_boxed_answer
+        return extract_boxed_answer(response, valid_choices)
 
     def get_temperature(self) -> float:
         return 0.0
@@ -95,61 +108,40 @@ class ZeroShotCoTStrategy(ReasoningStrategy):
     Based on: Kojima et al. "Large Language Models are Zero-Shot Reasoners" (2022)
     """
 
-    def __init__(self, cot_trigger: str = "Let's think step by step:"):
+    def __init__(self, cot_trigger: str = "Let's think step by step:", max_tokens: Optional[int] = None):
         """
         Args:
             cot_trigger: The phrase that triggers CoT reasoning
+            max_tokens: Maximum tokens for model response (default: 32000)
         """
+        super().__init__(max_tokens)
         self.cot_trigger = cot_trigger
 
     def format_prompt(self, question: str, choices: List[str],
                      instruction: str = None) -> str:
         from .prompts import format_multiple_choice_prompt
 
-        # Modify instruction to encourage reasoning
-        if instruction:
-            # Remove "only respond with letter" type instructions
-            instruction = re.sub(
-                r'only respond with.*?\.',
-                'Think through the problem step by step, then provide your answer.',
-                instruction,
-                flags=re.IGNORECASE
+        # Modify instruction to encourage reasoning with boxed answer
+        if instruction is None:
+            instruction = (
+                "Think through this problem step by step.\n"
+                "After your reasoning, provide your final answer in the format: \\boxed{X} where X is the letter of your choice."
             )
+        else:
+            # Ensure boxed notation instruction is included
+            if "boxed" not in instruction.lower():
+                instruction = instruction + "\nProvide your final answer in the format: \\boxed{X} where X is the letter of your choice."
 
-        base_prompt = format_multiple_choice_prompt(question, choices, instruction)
+        base_prompt = format_multiple_choice_prompt(question, choices, instruction, use_boxed=True)
         return f"{base_prompt}\n\n{self.cot_trigger}"
 
     def extract_answer(self, response: str, valid_choices: List[str]) -> Optional[str]:
         """
         Extract answer from CoT response
-
-        Looks for patterns like:
-        - "Therefore, the answer is C"
-        - "The correct answer is C"
-        - "Answer: C"
-        Falls back to standard extraction if patterns not found
+        Prioritizes boxed notation, then falls back to pattern matching
         """
-        # Try CoT-specific patterns first
-        patterns = [
-            r'(?:therefore|thus|so|hence),?\s+(?:the\s+)?answer\s+is\s+([A-Z])',
-            r'(?:final\s+)?answer\s*:\s*([A-Z])',
-            r'the\s+correct\s+(?:answer|option|choice)\s+is\s+([A-Z])',
-            r'(?:i\s+)?(?:choose|select)\s+(?:option\s+)?([A-Z])',
-        ]
-
-        for pattern in patterns:
-            match = re.search(pattern, response, re.IGNORECASE)
-            if match:
-                candidate = match.group(1).upper()
-                if candidate in valid_choices:
-                    return candidate
-
-        # Fallback: use standard extraction
-        from .prompts import extract_letter_answer
-        return extract_letter_answer(response, valid_choices)
-
-    def get_max_tokens(self) -> int:
-        return 512  # Allow space for reasoning
+        from .prompts import extract_boxed_answer
+        return extract_boxed_answer(response, valid_choices)
 
     def get_temperature(self) -> float:
         return 0.0
@@ -163,7 +155,7 @@ class FewShotCoTStrategy(ReasoningStrategy):
     Based on: Wei et al. "Chain-of-Thought Prompting Elicits Reasoning in LLMs" (2022)
     """
 
-    def __init__(self, examples: List[Dict[str, str]]):
+    def __init__(self, examples: List[Dict[str, str]], max_tokens: Optional[int] = None):
         """
         Args:
             examples: List of dicts with keys:
@@ -171,7 +163,9 @@ class FewShotCoTStrategy(ReasoningStrategy):
                 - choices: List[str]
                 - reasoning: str (the step-by-step reasoning)
                 - answer: str (the final answer letter)
+            max_tokens: Maximum tokens for model response (default: 32000)
         """
+        super().__init__(max_tokens)
         self.examples = examples
 
     def format_prompt(self, question: str, choices: List[str],
@@ -217,9 +211,6 @@ class FewShotCoTStrategy(ReasoningStrategy):
     def extract_answer(self, response: str, valid_choices: List[str]) -> Optional[str]:
         # Use same extraction as ZeroShotCoT
         return ZeroShotCoTStrategy().extract_answer(response, valid_choices)
-
-    def get_max_tokens(self) -> int:
-        return 512
 
     def get_temperature(self) -> float:
         return 0.0
@@ -317,6 +308,7 @@ def create_strategy(strategy_name: str, **kwargs) -> ReasoningStrategy:
     Args:
         strategy_name: One of 'direct', 'zero-shot-cot', 'few-shot-cot', 'self-consistency'
         **kwargs: Strategy-specific arguments
+            - max_tokens: Maximum tokens for model response (default: 32000)
             - For few-shot-cot: examples (List[Dict])
             - For self-consistency: base_strategy (str), n_samples (int)
 
@@ -324,29 +316,31 @@ def create_strategy(strategy_name: str, **kwargs) -> ReasoningStrategy:
         ReasoningStrategy instance
 
     Examples:
-        >>> strategy = create_strategy('direct')
-        >>> strategy = create_strategy('zero-shot-cot')
-        >>> strategy = create_strategy('few-shot-cot', examples=[...])
-        >>> strategy = create_strategy('self-consistency', base_strategy='zero-shot-cot', n_samples=5)
+        >>> strategy = create_strategy('direct', max_tokens=16000)
+        >>> strategy = create_strategy('zero-shot-cot', max_tokens=32000)
+        >>> strategy = create_strategy('few-shot-cot', examples=[...], max_tokens=32000)
+        >>> strategy = create_strategy('self-consistency', base_strategy='zero-shot-cot', n_samples=5, max_tokens=32000)
     """
+    max_tokens = kwargs.get('max_tokens', None)  # None will use default 32000
+
     if strategy_name == 'direct':
-        return DirectStrategy()
+        return DirectStrategy(max_tokens=max_tokens)
 
     elif strategy_name == 'zero-shot-cot':
         cot_trigger = kwargs.get('cot_trigger', "Let's think step by step:")
-        return ZeroShotCoTStrategy(cot_trigger=cot_trigger)
+        return ZeroShotCoTStrategy(cot_trigger=cot_trigger, max_tokens=max_tokens)
 
     elif strategy_name == 'few-shot-cot':
         examples = kwargs.get('examples', [])
         if not examples:
             raise ValueError("few-shot-cot requires 'examples' argument")
-        return FewShotCoTStrategy(examples)
+        return FewShotCoTStrategy(examples, max_tokens=max_tokens)
 
     elif strategy_name == 'self-consistency':
         base_name = kwargs.get('base_strategy', 'zero-shot-cot')
         n_samples = kwargs.get('n_samples', 5)
 
-        # Recursively create base strategy
+        # Recursively create base strategy (pass max_tokens to base)
         base_kwargs = {k: v for k, v in kwargs.items()
                       if k not in ['base_strategy', 'n_samples']}
         base_strategy = create_strategy(base_name, **base_kwargs)

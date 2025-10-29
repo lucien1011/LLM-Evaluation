@@ -1,0 +1,38 @@
+{
+  "description": "Full evaluation across all benchmarks and reasoning methods",
+  "models": [
+    "gemma3:1b",
+    "gemma3:4b",
+    "gemma3:27b"
+  ],
+  "reasoning_methods": [
+    "direct",
+    "zero-shot-cot",
+    "few-shot-cot",
+    "self-consistency"
+  ],
+  "benchmarks": [
+    "arc",
+    "mmlu",
+    "gpqa",
+    "hellaswag",
+    "truthfulqa",
+    "mmlu-pro",
+    "gsm8k",
+    "humaneval"
+  ],
+  "mmlu_subjects": [
+    "high_school_physics",
+    "high_school_chemistry",
+    "high_school_biology",
+    "high_school_mathematics",
+    "college_physics",
+    "college_chemistry",
+    "college_biology",
+    "college_mathematics"
+  ],
+  "max_samples": null,
+  "max_tokens": 32000,
+  "ollama_url": "http://localhost:11434",
+  "output_dir": "results/full_evaluation"
+}

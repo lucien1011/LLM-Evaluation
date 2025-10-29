@@ -51,9 +51,37 @@ ollama pull gemma3:latest
 
 ### Run Your First Benchmark
 
+#### Option 1: Batch Evaluation (Recommended)
+Run multiple benchmarks across multiple models with one command:
+
+```bash
+# Quick test (2 models × 2 benchmarks × 100 samples each)
+python run_benchmarks.py \
+    --models gemma3:1b gemma3:4b \
+    --reasoning direct zero-shot-cot \
+    --benchmarks arc gpqa \
+    --max-samples 100
+
+# Or use a configuration file
+python run_benchmarks.py --config experiments/quick_test.json
+
+# See real-time progress bars for each benchmark!
+```
+
+**Features:**
+- ✅ Real-time progress bars
+- ✅ Automatic result organization
+- ✅ Run multiple models/benchmarks in one command
+- ✅ Configuration file support for reproducible experiments
+
+See `BATCH_QUICK_REFERENCE.md` for more examples.
+
+#### Option 2: Individual Benchmarks
+Run benchmarks one at a time:
+
 ```bash
 # Quick MMLU test (10 samples per subject)
-python mmlu_benchmark_modular.py --model gemma3:latest --max-samples 10
+python mmlu_benchmark.py --model gemma3:latest --max-samples 10
 
 # Quick MMLU-Pro test
 python mmlu_pro_benchmark.py --model gemma3:latest --max-samples 10
@@ -68,6 +96,8 @@ python visualize_results.py --input-dir output/json --plot-types overall
 
 | Script | Purpose | Benchmark | Questions | Format |
 |--------|---------|-----------|-----------|--------|
+| **run_benchmarks.py** ⭐ | **Batch evaluation** | **All** | - | **Runs multiple benchmarks** |
+| **debug_model_comparison.py** | Model comparison tool | All | - | Compare models on single questions |
 | **mmlu_benchmark.py** | MMLU evaluation | MMLU | 14,000 | 4 choices (A-D) |
 | **mmlu_pro_benchmark.py** | MMLU-Pro evaluation | MMLU-Pro | 12,000+ | 10 choices (A-J) |
 | **truthfulqa_benchmark.py** | TruthfulQA evaluation | TruthfulQA | 817 | 4-5 choices |
