@@ -24,12 +24,9 @@ def create_hellaswag_evaluator(model_name: str, ollama_url: str, strategy: Reaso
     def evaluate_hellaswag_sample(sample: Dict) -> Tuple[bool, str, str]:
         question, choices, correct_letter = parse_hellaswag_sample(sample)
 
-        instruction = (
-            "Complete the following scenario by selecting the most plausible continuation.\n"
-            "Use your commonsense reasoning about everyday situations."
-        )
-
-        prompt = strategy.format_prompt(question, choices, instruction)
+        # Use strategy to format prompt with default instruction
+        # (includes \boxed{} notation for proper answer extraction)
+        prompt = strategy.format_prompt(question, choices)
 
         # Use longer timeout for CoT reasoning
         timeout = 180 if strategy.get_max_tokens() > 100 else 60

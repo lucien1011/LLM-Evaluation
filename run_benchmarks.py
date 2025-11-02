@@ -124,9 +124,9 @@ def get_benchmark_args(
         # Create output filename: {benchmark}_{model}_{reasoning}.csv
         # Sanitize model name (replace : with _)
         safe_model = model.replace(':', '_')
-        filename = f"{benchmark}_{safe_model}_{reasoning}.csv"
+        filename = f"{benchmark}_{safe_model}_{reasoning}.json"
         if benchmark == 'mmlu' and mmlu_subject:
-            filename = f"mmlu_{mmlu_subject}_{safe_model}_{reasoning}.csv"
+            filename = f"mmlu_{mmlu_subject}_{safe_model}_{reasoning}.json"
 
         output_path = Path(output_dir) / filename
         args.extend(['--output', str(output_path)])
@@ -137,19 +137,28 @@ def get_benchmark_args(
 def run_single_benchmark(
     benchmark: str,
     model: str,
-    reasoning: str,
+    reasoning_config: Dict[str, Any],  # Changed from str to dict
     ollama_url: str,
     max_samples: Optional[int] = None,
     mmlu_subject: Optional[str] = None,
     output_dir: Optional[str] = None,
     max_tokens: int = 32000
 ) -> Dict[str, Any]:
-    """Run a single benchmark evaluation"""
+    """Run a single benchmark evaluation
+
+    Args:
+        reasoning_config: Dict with 'name', 'temperature', 'max_tokens', etc.
+    """
+
+    # Extract reasoning method name and settings
+    reasoning_name = reasoning_config.get('name', 'direct')
+    method_temp = reasoning_config.get('temperature')
+    method_max_tokens = reasoning_config.get('max_tokens', max_tokens)
 
     # Construct command
     args = get_benchmark_args(
-        benchmark, model, reasoning, ollama_url,
-        max_samples, mmlu_subject, output_dir, max_tokens
+        benchmark, model, reasoning_name, ollama_url,
+        max_samples, mmlu_subject, output_dir, method_max_tokens
     )
 
     if not args:
@@ -158,7 +167,7 @@ def run_single_benchmark(
             'error': f'Unknown benchmark: {benchmark}',
             'benchmark': benchmark,
             'model': model,
-            'reasoning': reasoning
+            'reasoning': reasoning_name
         }
 
     # Create benchmark identifier
@@ -166,7 +175,9 @@ def run_single_benchmark(
     if benchmark == 'mmlu' and mmlu_subject:
         benchmark_id = f"{benchmark}_{mmlu_subject}"
 
-    print_info(f"Running: {benchmark_id} | {model} | {reasoning}")
+    # Display with temperature info if specified
+    temp_info = f" (T={method_temp})" if method_temp is not None else ""
+    print_info(f"Running: {benchmark_id} | {model} | {reasoning_name}{temp_info}")
     print(f"  Command: {' '.join(args)}")
     print()  # Add blank line before progress output
 
@@ -183,7 +194,7 @@ def run_single_benchmark(
 
         # Wait for process to complete with timeout
         try:
-            return_code = process.wait(timeout=3600)  # 1 hour timeout
+            return_code = process.wait(timeout=36000)  # 1 hour timeout
         except subprocess.TimeoutExpired:
             process.kill()
             elapsed_time = time.time() - start_time
@@ -192,7 +203,8 @@ def run_single_benchmark(
                 'success': False,
                 'benchmark': benchmark_id,
                 'model': model,
-                'reasoning': reasoning,
+                'reasoning': reasoning_name,
+                'reasoning_config': reasoning_config,
                 'elapsed_time': elapsed_time,
                 'error': 'Timeout after 1 hour'
             }
@@ -210,7 +222,8 @@ def run_single_benchmark(
                 'success': True,
                 'benchmark': benchmark_id,
                 'model': model,
-                'reasoning': reasoning,
+                'reasoning': reasoning_name,
+                'reasoning_config': reasoning_config,
                 'elapsed_time': elapsed_time,
                 'stdout': '',  # Not captured when streaming to terminal
                 'stderr': ''
@@ -221,7 +234,8 @@ def run_single_benchmark(
                 'success': False,
                 'benchmark': benchmark_id,
                 'model': model,
-                'reasoning': reasoning,
+                'reasoning': reasoning_name,
+                'reasoning_config': reasoning_config,
                 'elapsed_time': elapsed_time,
                 'error': f'Process exited with code {return_code}',
                 'exit_code': return_code
@@ -233,7 +247,8 @@ def run_single_benchmark(
             'success': False,
             'benchmark': benchmark_id,
             'model': model,
-            'reasoning': reasoning,
+            'reasoning': reasoning_name,
+            'reasoning_config': reasoning_config,
             'error': str(e)
         }
 
@@ -256,7 +271,9 @@ def run_batch_benchmarks(
     # Print configuration
     print_info("Configuration:")
     print(f"  Models: {', '.join(models)}")
-    print(f"  Reasoning methods: {', '.join(reasoning_methods)}")
+    # Extract method names for display (handle both str and dict formats)
+    method_names = [m if isinstance(m, str) else m.get('name', 'unknown') for m in reasoning_methods]
+    print(f"  Reasoning methods: {', '.join(method_names)}")
     print(f"  Benchmarks: {', '.join(benchmarks)}")
     if mmlu_subjects:
         print(f"  MMLU subjects: {', '.join(mmlu_subjects)}")
@@ -470,7 +487,24 @@ Examples:
         config = load_config(args.config)
 
         models = config.get('models', [])
-        reasoning_methods = config.get('reasoning_methods', ['direct'])
+        reasoning_methods_raw = config.get('reasoning_methods', ['direct'])
+
+        # Handle both formats: simple list of strings OR list of dicts with settings
+        reasoning_methods = []
+        for method in reasoning_methods_raw:
+            if isinstance(method, str):
+                # Simple format: just method name
+                reasoning_methods.append({
+                    'name': method,
+                    'temperature': None,
+                    'max_tokens': config.get('max_tokens', 32000)
+                })
+            elif isinstance(method, dict):
+                # Advanced format: dict with settings
+                reasoning_methods.append(method)
+            else:
+                raise ValueError(f"Invalid reasoning_methods format: {method}")
+
         benchmarks = config.get('benchmarks', [])
         mmlu_subjects = config.get('mmlu_subjects', None)
         ollama_url = config.get('ollama_url', 'http://localhost:11434')
@@ -484,7 +518,15 @@ Examples:
             parser.error("--models and --benchmarks are required (or use --config)")
 
         models = args.models
-        reasoning_methods = args.reasoning
+        # Convert simple string list to dict format for consistency
+        reasoning_methods = [
+            {
+                'name': method,
+                'temperature': None,
+                'max_tokens': args.max_tokens
+            }
+            for method in args.reasoning
+        ]
         benchmarks = args.benchmarks
         mmlu_subjects = args.mmlu_subjects
         ollama_url = args.url

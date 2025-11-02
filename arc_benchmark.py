@@ -25,13 +25,9 @@ def create_arc_evaluator(model_name: str, ollama_url: str, strategy: ReasoningSt
     def evaluate_arc_sample(sample: Dict) -> Tuple[bool, str, str]:
         question, choices, correct_letter = parse_arc_sample(sample)
 
-        instruction = (
-            "Answer the following science question by selecting the correct option.\n"
-            "Use scientific reasoning and common sense."
-        )
-
-        # Use strategy to format prompt
-        prompt = strategy.format_prompt(question, choices, instruction)
+        # Use strategy to format prompt with default instruction
+        # (includes \boxed{} notation for proper answer extraction)
+        prompt = strategy.format_prompt(question, choices)
 
         # Use longer timeout for CoT reasoning
         timeout = 180 if strategy.get_max_tokens() > 100 else 60
@@ -115,6 +111,8 @@ def main():
     parser.add_argument("--reasoning", type=str, default="direct",
                        choices=["direct", "zero-shot-cot", "few-shot-cot", "self-consistency"],
                        help="Reasoning strategy to use")
+    parser.add_argument("--temperature", type=float, default=0.5,
+                       help="Temperature for model generation")
     parser.add_argument("--cot-examples", type=int, default=3,
                        help="Number of examples for few-shot CoT")
     parser.add_argument("--sc-samples", type=int, default=5,
@@ -135,11 +133,11 @@ def main():
     # Create reasoning strategy
     if args.reasoning == "few-shot-cot":
         examples = get_cot_examples('arc', n=args.cot_examples)
-        strategy = create_strategy('few-shot-cot', examples=examples)
+        strategy = create_strategy('few-shot-cot', temperature=args.temperature, examples=examples)
     elif args.reasoning == "self-consistency":
-        strategy = create_strategy('self-consistency', base_strategy='zero-shot-cot', n_samples=args.sc_samples)
+        strategy = create_strategy('self-consistency', base_strategy='zero-shot-cot', temperature=args.temperature, n_samples=args.sc_samples)
     else:
-        strategy = create_strategy(args.reasoning)
+        strategy = create_strategy(args.reasoning, temperature=args.temperature, )
 
     results = benchmark_arc(args.model, args.url, args.difficulty, args.split, args.max_samples, strategy)
 

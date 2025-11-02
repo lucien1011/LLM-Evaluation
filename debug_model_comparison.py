@@ -164,6 +164,7 @@ def query_model_with_strategy(
     reasoning_method: str,
     ollama_url: str,
     max_tokens: int = 32000,
+    temperature: float = 0.5,
     benchmark: str = 'arc'
 ) -> Dict[str, Any]:
     """
@@ -175,12 +176,12 @@ def query_model_with_strategy(
     # Create strategy
     if reasoning_method == 'few-shot-cot':
         examples = get_cot_examples(benchmark.lower(), n=3)
-        strategy = create_strategy('few-shot-cot', examples=examples, max_tokens=max_tokens)
+        strategy = create_strategy('few-shot-cot', examples=examples, max_tokens=max_tokens, temperature=temperature)
     elif reasoning_method == 'self-consistency':
         strategy = create_strategy('self-consistency', base_strategy='zero-shot-cot',
-                                   n_samples=5, max_tokens=max_tokens)
+                                   n_samples=5, max_tokens=max_tokens, temperature=temperature)
     else:
-        strategy = create_strategy(reasoning_method, max_tokens=max_tokens)
+        strategy = create_strategy(reasoning_method, max_tokens=max_tokens, temperature=temperature)
 
     # Format prompt
     prompt = strategy.format_prompt(question, choices)
@@ -529,6 +530,12 @@ Examples:
         help='Maximum tokens for model response (default: 32000)'
     )
     parser.add_argument(
+        '--temperature',
+        type=float,
+        default=0.5,
+        help='Temperature for model response (default: 0.5)'
+    )
+    parser.add_argument(
         '--output',
         type=str,
         default=None,
@@ -581,6 +588,7 @@ Examples:
                 reasoning_method=reasoning_method,
                 ollama_url=args.url,
                 max_tokens=args.max_tokens,
+                temperature=args.temperature,
                 benchmark=args.benchmark
             )
 

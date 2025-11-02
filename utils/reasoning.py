@@ -17,7 +17,7 @@ from collections import Counter
 class ReasoningStrategy(ABC):
     """Base class for reasoning strategies"""
 
-    def __init__(self, max_tokens: Optional[int] = None):
+    def __init__(self, max_tokens: Optional[int] = None, temperature: Optional[float] = None):
         """
         Initialize reasoning strategy
 
@@ -25,6 +25,7 @@ class ReasoningStrategy(ABC):
             max_tokens: Maximum tokens for model response (default: 32000)
         """
         self.max_tokens = max_tokens if max_tokens is not None else 32000
+        self.temperature = temperature if temperature is not None else 0.0
 
     @abstractmethod
     def format_prompt(self, question: str, choices: List[str],
@@ -62,7 +63,7 @@ class ReasoningStrategy(ABC):
 
     def get_temperature(self) -> float:
         """Return recommended temperature for this strategy"""
-        return 0.0
+        return self.temperature
 
     def requires_multiple_samples(self) -> bool:
         """Whether this strategy requires multiple model calls"""
@@ -80,12 +81,12 @@ class DirectStrategy(ReasoningStrategy):
     Prompts the model to answer immediately with just the letter.
     """
 
-    def __init__(self, max_tokens: Optional[int] = None):
+    def __init__(self, max_tokens: Optional[int] = None, **kwargs):
         """
         Args:
             max_tokens: Maximum tokens for model response (default: 32000)
         """
-        super().__init__(max_tokens)
+        super().__init__(max_tokens, **kwargs)
 
     def format_prompt(self, question: str, choices: List[str],
                      instruction: str = None) -> str:
@@ -95,10 +96,7 @@ class DirectStrategy(ReasoningStrategy):
     def extract_answer(self, response: str, valid_choices: List[str]) -> Optional[str]:
         from .prompts import extract_boxed_answer
         return extract_boxed_answer(response, valid_choices)
-
-    def get_temperature(self) -> float:
-        return 0.0
-
+    
 
 class ZeroShotCoTStrategy(ReasoningStrategy):
     """
@@ -108,13 +106,13 @@ class ZeroShotCoTStrategy(ReasoningStrategy):
     Based on: Kojima et al. "Large Language Models are Zero-Shot Reasoners" (2022)
     """
 
-    def __init__(self, cot_trigger: str = "Let's think step by step:", max_tokens: Optional[int] = None):
+    def __init__(self, cot_trigger: str = "Let's think step by step:", max_tokens: Optional[int] = None, **kwargs):
         """
         Args:
             cot_trigger: The phrase that triggers CoT reasoning
             max_tokens: Maximum tokens for model response (default: 32000)
         """
-        super().__init__(max_tokens)
+        super().__init__(max_tokens, **kwargs)
         self.cot_trigger = cot_trigger
 
     def format_prompt(self, question: str, choices: List[str],
@@ -143,9 +141,6 @@ class ZeroShotCoTStrategy(ReasoningStrategy):
         from .prompts import extract_boxed_answer
         return extract_boxed_answer(response, valid_choices)
 
-    def get_temperature(self) -> float:
-        return 0.0
-
 
 class FewShotCoTStrategy(ReasoningStrategy):
     """
@@ -155,7 +150,7 @@ class FewShotCoTStrategy(ReasoningStrategy):
     Based on: Wei et al. "Chain-of-Thought Prompting Elicits Reasoning in LLMs" (2022)
     """
 
-    def __init__(self, examples: List[Dict[str, str]], max_tokens: Optional[int] = None):
+    def __init__(self, examples: List[Dict[str, str]], max_tokens: Optional[int] = None, **kwargs):
         """
         Args:
             examples: List of dicts with keys:
@@ -165,7 +160,7 @@ class FewShotCoTStrategy(ReasoningStrategy):
                 - answer: str (the final answer letter)
             max_tokens: Maximum tokens for model response (default: 32000)
         """
-        super().__init__(max_tokens)
+        super().__init__(max_tokens, **kwargs)
         self.examples = examples
 
     def format_prompt(self, question: str, choices: List[str],
@@ -212,9 +207,6 @@ class FewShotCoTStrategy(ReasoningStrategy):
         # Use same extraction as ZeroShotCoT
         return ZeroShotCoTStrategy().extract_answer(response, valid_choices)
 
-    def get_temperature(self) -> float:
-        return 0.0
-
 
 class SelfConsistencyStrategy(ReasoningStrategy):
     """
@@ -224,12 +216,13 @@ class SelfConsistencyStrategy(ReasoningStrategy):
     Based on: Wang et al. "Self-Consistency Improves Chain of Thought Reasoning" (2022)
     """
 
-    def __init__(self, base_strategy: ReasoningStrategy, n_samples: int = 5):
+    def __init__(self, base_strategy: ReasoningStrategy, n_samples: int = 5, **kwargs):
         """
         Args:
             base_strategy: Underlying CoT strategy (typically ZeroShotCoT or FewShotCoT)
             n_samples: Number of reasoning paths to sample
         """
+        super().__init__(**kwargs)
         self.base_strategy = base_strategy
         self.n_samples = n_samples
 
@@ -290,10 +283,6 @@ class SelfConsistencyStrategy(ReasoningStrategy):
     def get_max_tokens(self) -> int:
         return self.base_strategy.get_max_tokens()
 
-    def get_temperature(self) -> float:
-        # Use higher temperature for diversity in reasoning paths
-        return 0.7
-
     def requires_multiple_samples(self) -> bool:
         return True
 
@@ -322,23 +311,25 @@ def create_strategy(strategy_name: str, **kwargs) -> ReasoningStrategy:
         >>> strategy = create_strategy('self-consistency', base_strategy='zero-shot-cot', n_samples=5, max_tokens=32000)
     """
     max_tokens = kwargs.get('max_tokens', None)  # None will use default 32000
+    temperature = kwargs.get('temperature', None)  # None will use default 0.0
 
     if strategy_name == 'direct':
-        return DirectStrategy(max_tokens=max_tokens)
+        return DirectStrategy(max_tokens=max_tokens, temperature=temperature)
 
     elif strategy_name == 'zero-shot-cot':
         cot_trigger = kwargs.get('cot_trigger', "Let's think step by step:")
-        return ZeroShotCoTStrategy(cot_trigger=cot_trigger, max_tokens=max_tokens)
+        return ZeroShotCoTStrategy(cot_trigger=cot_trigger, max_tokens=max_tokens, temperature=temperature)
 
     elif strategy_name == 'few-shot-cot':
         examples = kwargs.get('examples', [])
         if not examples:
             raise ValueError("few-shot-cot requires 'examples' argument")
-        return FewShotCoTStrategy(examples, max_tokens=max_tokens)
+        return FewShotCoTStrategy(examples, max_tokens=max_tokens, temperature=temperature)
 
     elif strategy_name == 'self-consistency':
         base_name = kwargs.get('base_strategy', 'zero-shot-cot')
         n_samples = kwargs.get('n_samples', 5)
+        temperature = kwargs.get('temperature', 0.7)  # Higher temp for diversity
 
         # Recursively create base strategy (pass max_tokens to base)
         base_kwargs = {k: v for k, v in kwargs.items()

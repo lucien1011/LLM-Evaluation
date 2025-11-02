@@ -57,14 +57,9 @@ def create_mmlu_pro_evaluator(model_name: str, ollama_url: str, strategy: Reason
         # Parse the MMLU-Pro sample
         question, choices, correct_letter = parse_mmlu_pro_sample(sample)
 
-        # Custom instruction for 10 choices
-        instruction = (
-            "Answer the following multiple choice question by selecting the correct option.\n"
-            "The options are labeled A through J (10 choices)."
-        )
-
-        # Format the prompt using the reasoning strategy
-        prompt = strategy.format_prompt(question, choices, instruction)
+        # Use strategy to format prompt with default instruction
+        # (includes \boxed{} notation for proper answer extraction)
+        prompt = strategy.format_prompt(question, choices)
 
         # Use longer timeout for CoT reasoning
         timeout = 180 if strategy.get_max_tokens() > 100 else 60

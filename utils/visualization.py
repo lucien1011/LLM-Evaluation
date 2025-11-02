@@ -403,9 +403,13 @@ def load_results_for_comparison(
 
         return comparison_data
 
-    else:  # flat structure - backward compatible
+    else:  # flat structure
         files = list(base_dir.glob('*.json'))
-        results = {}
+
+        # Skip batch_summary.json
+        files = [f for f in files if f.name != 'batch_summary.json']
+
+        comparison_data = {}
 
         for filepath in files:
             try:
@@ -420,21 +424,44 @@ def load_results_for_comparison(
                 if models and model not in models:
                     continue
 
-                results[model] = result
+                # Extract reasoning method from filename or file content
+                reasoning_method = None
+
+                # Try to extract from filename first (e.g., arc_gemma3_1b_direct.json -> direct)
+                filename = filepath.stem  # Get filename without extension
+                for method in ['direct', 'zero-shot-cot', 'few-shot-cot', 'self-consistency']:
+                    if method in filename:
+                        reasoning_method = method
+                        break
+
+                # If not found in filename, try from result content
+                if reasoning_method is None and 'reasoning_strategy' in result:
+                    reasoning_method = result.get('reasoning_strategy', 'direct').lower()
+                    # Clean up strategy name (e.g., "ZeroShotCoTStrategy" -> "zero-shot-cot")
+                    if 'zeroshotcot' in reasoning_method.replace('-', ''):
+                        reasoning_method = 'zero-shot-cot'
+                    elif 'fewshotcot' in reasoning_method.replace('-', ''):
+                        reasoning_method = 'few-shot-cot'
+                    elif 'selfconsistency' in reasoning_method.replace('-', ''):
+                        reasoning_method = 'self-consistency'
+                    elif 'direct' in reasoning_method:
+                        reasoning_method = 'direct'
+
+                # Default to 'direct' if still not found
+                if reasoning_method is None:
+                    reasoning_method = 'direct'
+
+                # Filter by reasoning_methods if specified
+                if reasoning_methods and reasoning_method not in reasoning_methods:
+                    continue
+
+                # Add to comparison data structure
+                if reasoning_method not in comparison_data:
+                    comparison_data[reasoning_method] = {}
+
+                comparison_data[reasoning_method][model] = result
 
             except Exception as e:
                 print(f"Error loading {filepath}: {e}")
 
-        # Treat flat structure as 'direct' reasoning method
-        # Or try to extract from result if available
-        reasoning_method = 'direct'
-        if results:
-            # Check if any result has reasoning_strategy field
-            first_result = next(iter(results.values()))
-            if 'reasoning_strategy' in first_result:
-                reasoning_method = first_result.get('reasoning_strategy', 'direct').lower()
-                # Clean up strategy name
-                if 'strategy' in reasoning_method:
-                    reasoning_method = reasoning_method.replace('strategy', '').strip()
-
-        return {reasoning_method: results}
+        return comparison_data
