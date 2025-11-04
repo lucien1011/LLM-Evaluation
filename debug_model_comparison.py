@@ -1,181 +1,92 @@
 #!/usr/bin/env python3
 """
-Debug Model Comparison Script
+Debug Model Comparison Script for GSM8K (Math Problems)
 
-Compare how different models respond to the same question using different reasoning strategies.
-Useful for debugging why one model performs better than another.
+Compare how different models solve the same math problem using different reasoning strategies.
+Useful for debugging why one model performs better than another on mathematical reasoning.
 
 Usage:
-    python debug_model_comparison.py --benchmark arc --question-index 0 \\
-        --models gemma:1b gemma:4b --reasoning direct zero-shot-cot
+    python debug_model_comparison.py --question-index 0 \\
+        --models gemma3:1b gemma3:4b --reasoning direct zero-shot-cot
 
-    python debug_model_comparison.py --benchmark mmlu --subject high_school_physics \\
-        --question-index 5 --models gemma:1b gemma:4b gemma:7b \\
-        --reasoning direct zero-shot-cot few-shot-cot
+    python debug_model_comparison.py --question-index 10 \\
+        --models gemma3:1b gemma3:4b gemma3:27b \\
+        --reasoning direct zero-shot-cot self-consistency
 """
 
 import argparse
 import sys
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
 from pathlib import Path
 import json
 from datetime import datetime
 
 from utils.ollama import check_ollama_connection, query_ollama
+from utils.gsm8k import (
+    load_gsm8k_dataset,
+    parse_gsm8k_sample,
+    extract_numerical_answer,
+    compare_numerical_answers,
+    format_gsm8k_instruction
+)
 from utils.reasoning import create_strategy
 from utils.cot_examples import get_cot_examples
 
+# Import reusable functions from MC debug script
+from mc_debug_model_comparison import (
+    save_results_to_file,
+    generate_analysis,
+    generate_comparison_table
+)
 
-def load_question_from_benchmark(benchmark: str, question_index: int, subject: Optional[str] = None) -> Dict[str, Any]:
+
+def load_gsm8k_question(question_index: int, split: str = 'test') -> Dict[str, Any]:
     """
-    Load a specific question from a benchmark dataset
+    Load a specific question from GSM8K dataset
 
     Args:
-        benchmark: Benchmark name (arc, mmlu, gpqa, hellaswag, truthfulqa, mmlu-pro)
         question_index: Index of the question to load
-        subject: Subject name (required for MMLU)
+        split: Dataset split ('test' or 'train')
 
     Returns:
-        Dictionary with question, choices, correct_answer, and metadata
+        Dictionary with question, correct_answer, and metadata
     """
-    question_data = {}
+    dataset = load_gsm8k_dataset(split)
+    if dataset is None or question_index >= len(dataset):
+        raise ValueError(f"Question index {question_index} out of range (dataset has {len(dataset) if dataset else 0} questions)")
 
-    if benchmark == 'arc':
-        from utils.arc import load_arc_dataset, parse_arc_sample
-        dataset = load_arc_dataset('test', 'ARC-Challenge')  # Fixed: split first, then difficulty
-        if dataset is None or question_index >= len(dataset):
-            raise ValueError(f"Question index {question_index} out of range")
+    sample = dataset[question_index]
+    question, correct_answer = parse_gsm8k_sample(sample)
 
-        sample = dataset[question_index]
-        question, choices, correct_letter = parse_arc_sample(sample)
-
-        question_data = {
-            'question': question,
-            'choices': choices,
-            'correct_answer': correct_letter,
-            'benchmark': 'ARC',
-            'subject': 'ARC-Challenge',
-            'index': question_index
-        }
-
-    elif benchmark == 'mmlu':
-        if not subject:
-            raise ValueError("MMLU requires --subject argument")
-
-        from utils.mmlu import load_mmlu_subject, parse_mmlu_sample
-        dataset = load_mmlu_subject(subject, 'test')
-        if dataset is None or question_index >= len(dataset):
-            raise ValueError(f"Question index {question_index} out of range")
-
-        sample = dataset[question_index]
-        question, choices, correct_letter = parse_mmlu_sample(sample)
-
-        question_data = {
-            'question': question,
-            'choices': choices,
-            'correct_answer': correct_letter,
-            'benchmark': 'MMLU',
-            'subject': subject,
-            'index': question_index
-        }
-
-    elif benchmark == 'gpqa':
-        from utils.gpqa import load_gpqa_dataset, parse_gpqa_sample
-        dataset = load_gpqa_dataset('train')  # GPQA only has 'train' split
-        if dataset is None or question_index >= len(dataset):
-            raise ValueError(f"Question index {question_index} out of range")
-
-        sample = dataset[question_index]
-        question, choices, correct_letter = parse_gpqa_sample(sample)
-
-        question_data = {
-            'question': question,
-            'choices': choices,
-            'correct_answer': correct_letter,
-            'benchmark': 'GPQA',
-            'subject': 'gpqa',
-            'index': question_index
-        }
-
-    elif benchmark == 'hellaswag':
-        from utils.hellaswag import load_hellaswag_dataset, parse_hellaswag_sample
-        dataset = load_hellaswag_dataset('validation')  # HellaSwag uses 'validation' split
-        if dataset is None or question_index >= len(dataset):
-            raise ValueError(f"Question index {question_index} out of range")
-
-        sample = dataset[question_index]
-        context, choices, correct_letter = parse_hellaswag_sample(sample)
-
-        question_data = {
-            'question': context,
-            'choices': choices,
-            'correct_answer': correct_letter,
-            'benchmark': 'HellaSwag',
-            'subject': 'hellaswag',
-            'index': question_index
-        }
-
-    elif benchmark == 'truthfulqa':
-        from utils.truthfulqa import load_truthfulqa_dataset, parse_truthfulqa_mc1
-        dataset = load_truthfulqa_dataset()
-        if dataset is None or question_index >= len(dataset):
-            raise ValueError(f"Question index {question_index} out of range")
-
-        sample = dataset[question_index]
-        question, choices, correct_letter = parse_truthfulqa_mc1(sample)
-
-        question_data = {
-            'question': question,
-            'choices': choices,
-            'correct_answer': correct_letter,
-            'benchmark': 'TruthfulQA',
-            'subject': 'truthfulqa',
-            'index': question_index
-        }
-
-    elif benchmark == 'mmlu-pro':
-        from utils.mmlu_pro import load_mmlu_pro_dataset, parse_mmlu_pro_sample
-        dataset = load_mmlu_pro_dataset('test')
-        if dataset is None or question_index >= len(dataset):
-            raise ValueError(f"Question index {question_index} out of range")
-
-        sample = dataset[question_index]
-        question, choices, correct_letter = parse_mmlu_pro_sample(sample)
-
-        question_data = {
-            'question': question,
-            'choices': choices,
-            'correct_answer': correct_letter,
-            'benchmark': 'MMLU-Pro',
-            'subject': 'mmlu-pro',
-            'index': question_index
-        }
-
-    else:
-        raise ValueError(f"Unsupported benchmark: {benchmark}")
-
-    return question_data
+    return {
+        'question': question,
+        'correct_answer': correct_answer,
+        'benchmark': 'GSM8K',
+        'subject': 'math',
+        'index': question_index,
+        'split': split
+    }
 
 
 def query_model_with_strategy(
     model_name: str,
     question: str,
-    choices: List[str],
     reasoning_method: str,
     ollama_url: str,
     max_tokens: int = 32000,
-    temperature: float = 0.5,
-    benchmark: str = 'arc'
+    temperature: float = 0.5
 ) -> Dict[str, Any]:
     """
-    Query a model with a specific reasoning strategy
+    Query a model with a specific reasoning strategy for GSM8K
 
     Returns:
         Dictionary with prompt, response, extracted_answer, and metadata
     """
+    instruction = format_gsm8k_instruction()
+
     # Create strategy
     if reasoning_method == 'few-shot-cot':
-        examples = get_cot_examples(benchmark.lower(), n=3)
+        examples = get_cot_examples('gsm8k', n=3)
         strategy = create_strategy('few-shot-cot', examples=examples, max_tokens=max_tokens, temperature=temperature)
     elif reasoning_method == 'self-consistency':
         strategy = create_strategy('self-consistency', base_strategy='zero-shot-cot',
@@ -183,11 +94,19 @@ def query_model_with_strategy(
     else:
         strategy = create_strategy(reasoning_method, max_tokens=max_tokens, temperature=temperature)
 
-    # Format prompt
-    prompt = strategy.format_prompt(question, choices)
-
-    # Determine valid choices based on number of options
-    valid_choices = [chr(65 + i) for i in range(len(choices))]  # A, B, C, D, ...
+    # Format prompt based on strategy
+    if hasattr(strategy, 'cot_trigger'):
+        # Zero-shot CoT: add trigger to instruction
+        prompt = f"{instruction}\n\n{question}\n\n{strategy.cot_trigger}"
+    elif hasattr(strategy, 'examples'):
+        # Few-shot CoT: format with examples
+        from utils.cot_examples import format_cot_example
+        formatted_examples = [format_cot_example(ex, 'gsm8k') for ex in strategy.examples]
+        examples_str = '\n\n---\n\n'.join(formatted_examples)
+        prompt = f"{instruction}\n\n{examples_str}\n\n---\n\nQuestion: {question}"
+    else:
+        # Direct strategy
+        prompt = f"{instruction}\n\n{question}"
 
     # Query model
     try:
@@ -205,8 +124,20 @@ def query_model_with_strategy(
                 )
                 responses.append(response)
 
-            # Extract answer from multiple responses
-            extracted_answer = strategy.extract_answer_from_multiple(responses, valid_choices)
+            # Extract numerical answers from all responses
+            predicted_answers = [extract_numerical_answer(r) for r in responses]
+            # Use majority voting
+            from collections import Counter
+            answer_counts = Counter(str(a) for a in predicted_answers if a is not None)
+            if answer_counts:
+                most_common_str = answer_counts.most_common(1)[0][0]
+                try:
+                    extracted_answer = float(most_common_str)
+                except:
+                    extracted_answer = None
+            else:
+                extracted_answer = None
+
             full_response = "\n\n---SAMPLE SEPARATOR---\n\n".join(
                 [f"Sample {i+1}:\n{r}" for i, r in enumerate(responses)]
             )
@@ -220,7 +151,7 @@ def query_model_with_strategy(
                 max_tokens=strategy.get_max_tokens(),
                 timeout=180
             )
-            extracted_answer = strategy.extract_answer(response, valid_choices)
+            extracted_answer = extract_numerical_answer(response)
             full_response = response
 
         return {
@@ -238,28 +169,26 @@ def query_model_with_strategy(
             'prompt': prompt,
             'response': None,
             'extracted_answer': None,
-            'max_tokens': strategy.get_max_tokens(),
-            'temperature': strategy.get_temperature(),
+            'max_tokens': strategy.get_max_tokens() if strategy else max_tokens,
+            'temperature': strategy.get_temperature() if strategy else temperature,
             'success': False,
             'error': str(e)
         }
 
 
 def print_question_info(question_data: Dict[str, Any]):
-    """Print formatted question information"""
+    """Print formatted question information for GSM8K"""
     print("\n" + "=" * 80)
     print("QUESTION INFORMATION")
     print("=" * 80)
     print(f"Benchmark: {question_data['benchmark']}")
     print(f"Subject: {question_data['subject']}")
+    print(f"Split: {question_data['split']}")
     print(f"Question Index: {question_data['index']}")
     print(f"Correct Answer: {question_data['correct_answer']}")
     print()
-    print(f"Question: {question_data['question']}")
-    print()
-    print("Choices:")
-    for choice in question_data['choices']:
-        print(f"  {choice}")
+    print(f"Question:")
+    print(f"{question_data['question']}")
     print("=" * 80)
 
 
@@ -267,9 +196,9 @@ def print_model_response(
     model_name: str,
     reasoning_method: str,
     result: Dict[str, Any],
-    correct_answer: str
+    correct_answer: float
 ):
-    """Print formatted model response"""
+    """Print formatted model response for GSM8K"""
     print("\n" + "-" * 80)
     print(f"MODEL: {model_name} | REASONING: {reasoning_method}")
     print("-" * 80)
@@ -278,8 +207,8 @@ def print_model_response(
         print(f"❌ ERROR: {result['error']}")
         return
 
-    # Check if correct
-    is_correct = result['extracted_answer'] == correct_answer
+    # Check if correct using numerical comparison
+    is_correct = compare_numerical_answers(result['extracted_answer'], correct_answer)
     status_icon = "✓" if is_correct else "✗"
 
     print(f"Extracted Answer: {result['extracted_answer']} {status_icon}")
@@ -294,17 +223,23 @@ def print_model_response(
     print()
     print("RESPONSE:")
     print("-" * 40)
-    print(result['response'])
+    # Truncate very long responses for readability
+    response = result['response']
+    if len(response) > 2000:
+        print(response[:2000])
+        print("\n... [truncated] ...")
+    else:
+        print(response)
     print("-" * 80)
 
 
-def generate_comparison_table(
+def generate_comparison_table_gsm8k(
     models: List[str],
     reasoning_methods: List[str],
     results: Dict[str, Dict[str, Dict]],
-    correct_answer: str
+    correct_answer: float
 ):
-    """Generate a comparison table showing all results"""
+    """Generate a comparison table showing all results for GSM8K"""
     print("\n" + "=" * 80)
     print("COMPARISON TABLE")
     print("=" * 80)
@@ -322,10 +257,14 @@ def generate_comparison_table(
         for method in reasoning_methods:
             result = results[model][method]
             if result['success']:
-                answer = result['extracted_answer'] or 'None'
-                is_correct = answer == correct_answer
-                status = "✓" if is_correct else "✗"
-                row += f"{answer} {status:<22} | "
+                answer = result['extracted_answer']
+                if answer is not None:
+                    answer_str = str(answer)
+                    is_correct = compare_numerical_answers(answer, correct_answer)
+                    status = "✓" if is_correct else "✗"
+                    row += f"{answer_str} {status:<{24-len(answer_str)}} | "
+                else:
+                    row += f"{'None ✗':<25} | "
             else:
                 row += f"{'ERROR':<25} | "
         print(row)
@@ -335,13 +274,13 @@ def generate_comparison_table(
     print("=" * 80)
 
 
-def generate_analysis(
+def generate_analysis_gsm8k(
     models: List[str],
     reasoning_methods: List[str],
     results: Dict[str, Dict[str, Dict]],
-    correct_answer: str
+    correct_answer: float
 ):
-    """Generate analysis of the results"""
+    """Generate analysis of the results for GSM8K"""
     print("\n" + "=" * 80)
     print("ANALYSIS")
     print("=" * 80)
@@ -355,7 +294,7 @@ def generate_analysis(
             result = results[model][method]
             if result['success']:
                 total_count += 1
-                if result['extracted_answer'] == correct_answer:
+                if compare_numerical_answers(result['extracted_answer'], correct_answer):
                     correct_count += 1
 
         accuracy = correct_count / total_count if total_count > 0 else 0
@@ -370,7 +309,7 @@ def generate_analysis(
             result = results[model][method]
             if result['success']:
                 total_count += 1
-                if result['extracted_answer'] == correct_answer:
+                if compare_numerical_answers(result['extracted_answer'], correct_answer):
                     correct_count += 1
 
         accuracy = correct_count / total_count if total_count > 0 else 0
@@ -388,7 +327,7 @@ def generate_analysis(
         correct_count = sum(
             1 for method in reasoning_methods
             if results[model][method]['success'] and
-               results[model][method]['extracted_answer'] == correct_answer
+               compare_numerical_answers(results[model][method]['extracted_answer'], correct_answer)
         )
         total_count = sum(
             1 for method in reasoning_methods
@@ -416,76 +355,55 @@ def generate_analysis(
         cot_result = results[model].get('zero-shot-cot', {})
 
         if direct_result.get('success') and cot_result.get('success'):
-            direct_correct = direct_result['extracted_answer'] == correct_answer
-            cot_correct = cot_result['extracted_answer'] == correct_answer
+            direct_correct = compare_numerical_answers(direct_result['extracted_answer'], correct_answer)
+            cot_correct = compare_numerical_answers(cot_result['extracted_answer'], correct_answer)
 
             if not direct_correct and cot_correct:
                 print(f"  → {model}: CoT helped! (wrong → correct)")
             elif direct_correct and not cot_correct:
                 print(f"  → {model}: CoT hurt! (correct → wrong)")
 
+    # Show numerical differences for incorrect answers
+    print("\nNumerical Differences (for incorrect answers):")
+    for model in models:
+        for method in reasoning_methods:
+            result = results[model][method]
+            if result['success'] and result['extracted_answer'] is not None:
+                if not compare_numerical_answers(result['extracted_answer'], correct_answer):
+                    diff = result['extracted_answer'] - correct_answer
+                    percent_error = abs(diff / correct_answer * 100) if correct_answer != 0 else float('inf')
+                    print(f"  {model} ({method}): {result['extracted_answer']} (off by {diff:+.2f}, {percent_error:.1f}% error)")
+
     print("=" * 80)
-
-
-def save_results_to_file(
-    question_data: Dict[str, Any],
-    models: List[str],
-    reasoning_methods: List[str],
-    results: Dict[str, Dict[str, Dict]],
-    output_path: str
-):
-    """Save detailed results to JSON file"""
-    output = {
-        'timestamp': datetime.now().isoformat(),
-        'question': question_data,
-        'models': models,
-        'reasoning_methods': reasoning_methods,
-        'results': results
-    }
-
-    output_path = Path(output_path)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-
-    with open(output_path, 'w') as f:
-        json.dump(output, f, indent=2)
-
-    print(f"\n✓ Detailed results saved to: {output_path}")
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Debug model comparison on a specific question",
+        description="Debug model comparison on GSM8K math problems",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Compare two Gemma models on ARC question
-  python debug_model_comparison.py --benchmark arc --question-index 0 \\
-      --models gemma:1b gemma:4b --reasoning direct zero-shot-cot
+  # Compare two models on GSM8K question
+  python debug_model_comparison.py --question-index 0 \\
+      --models gemma3:1b gemma3:4b --reasoning direct zero-shot-cot
 
   # Compare multiple models with multiple reasoning methods
-  python debug_model_comparison.py --benchmark mmlu --subject high_school_physics \\
-      --question-index 5 --models gemma:1b gemma:4b gemma:7b \\
-      --reasoning direct zero-shot-cot few-shot-cot
+  python debug_model_comparison.py --question-index 10 \\
+      --models gemma3:1b gemma3:4b gemma3:27b \\
+      --reasoning direct zero-shot-cot self-consistency
 
-  # Compare on GPQA with self-consistency
-  python debug_model_comparison.py --benchmark gpqa --question-index 10 \\
-      --models gemma:4b gemma:7b --reasoning zero-shot-cot self-consistency
+  # Use training set question
+  python debug_model_comparison.py --question-index 0 --split train \\
+      --models gemma3:1b gemma3:4b --reasoning direct zero-shot-cot
 
   # Save results to file
-  python debug_model_comparison.py --benchmark arc --question-index 0 \\
-      --models gemma:1b gemma:4b --reasoning direct zero-shot-cot \\
-      --output debug_results.json
+  python debug_model_comparison.py --question-index 0 \\
+      --models gemma3:1b gemma3:4b --reasoning direct zero-shot-cot \\
+      --output debug_gsm8k_results.json
         """
     )
 
     # Question selection
-    parser.add_argument(
-        '--benchmark',
-        type=str,
-        required=True,
-        choices=['arc', 'mmlu', 'gpqa', 'hellaswag', 'truthfulqa', 'mmlu-pro'],
-        help='Benchmark to load question from'
-    )
     parser.add_argument(
         '--question-index',
         type=int,
@@ -493,10 +411,11 @@ Examples:
         help='Index of the question in the dataset (0-based)'
     )
     parser.add_argument(
-        '--subject',
+        '--split',
         type=str,
-        default=None,
-        help='Subject name (required for MMLU, e.g., high_school_physics)'
+        default='test',
+        choices=['test', 'train'],
+        help='Dataset split (default: test)'
     )
 
     # Model and reasoning selection
@@ -505,7 +424,7 @@ Examples:
         type=str,
         nargs='+',
         required=True,
-        help='List of model names to compare (e.g., gemma:1b gemma:4b)'
+        help='List of model names to compare (e.g., gemma3:1b gemma3:4b)'
     )
     parser.add_argument(
         '--reasoning',
@@ -553,13 +472,9 @@ Examples:
     print("✓ Ollama is accessible\n")
 
     # Load question
-    print(f"Loading question from {args.benchmark}...")
+    print(f"Loading question from GSM8K ({args.split} split)...")
     try:
-        question_data = load_question_from_benchmark(
-            args.benchmark,
-            args.question_index,
-            args.subject
-        )
+        question_data = load_gsm8k_question(args.question_index, args.split)
     except Exception as e:
         print(f"❌ Error loading question: {e}")
         sys.exit(1)
@@ -584,19 +499,17 @@ Examples:
             result = query_model_with_strategy(
                 model_name=model,
                 question=question_data['question'],
-                choices=question_data['choices'],
                 reasoning_method=reasoning_method,
                 ollama_url=args.url,
                 max_tokens=args.max_tokens,
-                temperature=args.temperature,
-                benchmark=args.benchmark
+                temperature=args.temperature
             )
 
             results[model][reasoning_method] = result
 
             # Print brief status
             if result['success']:
-                is_correct = result['extracted_answer'] == question_data['correct_answer']
+                is_correct = compare_numerical_answers(result['extracted_answer'], question_data['correct_answer'])
                 status = "✓ CORRECT" if is_correct else "✗ INCORRECT"
                 print(f"  → {status} (answered: {result['extracted_answer']})")
             else:
@@ -617,7 +530,7 @@ Examples:
             )
 
     # Generate comparison table
-    generate_comparison_table(
+    generate_comparison_table_gsm8k(
         args.models,
         args.reasoning,
         results,
@@ -625,7 +538,7 @@ Examples:
     )
 
     # Generate analysis
-    generate_analysis(
+    generate_analysis_gsm8k(
         args.models,
         args.reasoning,
         results,

@@ -121,6 +121,7 @@ def benchmark_gsm8k(model_name: str, ollama_url: str, split: str = "test",
                                description="Processing GSM8K")
 
     results.update({
+        "benchmark": "gsm8k",
         "model": model_name,
         "elapsed_time_seconds": time.time() - start_time,
         "overall_accuracy": results["accuracy"],

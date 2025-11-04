@@ -661,7 +661,7 @@ Examples:
         '--benchmark',
         type=str,
         default=None,
-        choices=['mmlu', 'mmlu-pro', 'truthfulqa', 'arc', None],
+        choices=['mmlu', 'mmlu-pro', 'truthfulqa', 'arc', 'gsm8k', None],
         help='Benchmark type to visualize (default: auto-detect from files)'
     )
     parser.add_argument(

@@ -120,12 +120,19 @@ def detect_benchmark_type(result: Dict) -> str:
     if 'subject_results' in result:
         return 'mmlu'
 
-    # Check result count to distinguish (GSM8K has ~1000-8500, HellaSwag has ~70000)
+    # Check for GSM8K (has reasoning_strategy and ~1319 questions in test set)
+    # GSM8K files have reasoning_strategy field and total_questions in range 1000-2000
+    if 'reasoning_strategy' in result:
+        total = result.get('total_questions', 0)
+        if 1000 <= total <= 2000:
+            return 'gsm8k'
+
+    # Check result count to distinguish remaining benchmarks
     total = result.get('total_questions', 0)
     if total > 50000:
         return 'hellaswag'
     elif total > 5000:
-        return 'gsm8k'
+        return 'gsm8k'  # GSM8K train set (7473 questions)
 
     # Default to mmlu
     return 'mmlu'
